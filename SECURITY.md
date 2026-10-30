@@ -8,18 +8,16 @@ credential or let someone change published data.
 
 ## Credential model
 
-- **One R2 S3 API token per dataset write path**, held as encrypted Actions secrets and passed
-  only as environment variables to the single step that publishes:
-  - `ROADS_R2_ACCESS_KEY_ID` / `ROADS_R2_SECRET_ACCESS_KEY` — roads and places (`roads.yml`)
-  - `EVENTS_R2_ACCESS_KEY_ID` / `EVENTS_R2_SECRET_ACCESS_KEY` — road work (`road-work.yml`)
-  - `FUEL_R2_ACCESS_KEY_ID` / `FUEL_R2_SECRET_ACCESS_KEY` — fuel (`fuel.yml`)
+- **One R2 S3 API token for the data jobs**, held as encrypted Actions secrets and passed only as
+  environment variables to the single step that publishes:
+  - `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` — roads, places, road work and fuel
   - `R2_S3_ENDPOINT` — the account's R2 S3 endpoint (a secret because it names the account)
-- Each token is an R2 API token with **Object Read & Write on the public tiles bucket only**.
+- The token is an R2 API token with **Object Read & Write on the public tiles bucket only**.
   Cloudflare offers no write-only object permission, and the publishers need to read the live
   pointer and list objects for clean-up, so Read & Write on that one bucket is the narrowest scope.
-  R2 cannot scope a token to a key prefix, so the three tokens can each write the whole public
-  bucket; they exist separately so one can be revoked or rotated without stopping the others.
-- None of these tokens can reach any other bucket (including private route storage), Workers
+  R2 cannot scope a token to a key prefix, so separate tokens per job would each have the same
+  power; one token keeps rotation to one place.
+- The token cannot reach any other bucket (including private route storage), Workers
   deploys, DNS, zone settings or any database. Worker deploys, private storage and everything
   else stay in the private application repository with their own credentials.
 - Optional read-only feed keys: `WZDX_KEYS` (road-work step only) and `EIA_API_KEY` (fuel fetch

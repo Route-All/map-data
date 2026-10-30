@@ -6,7 +6,7 @@
 #
 # Secrets:
 #   EIA_API_KEY (optional, fetch step only; EIA's DEMO_KEY is used without it)
-#   R2_S3_ENDPOINT, FUEL_R2_ACCESS_KEY_ID / FUEL_R2_SECRET_ACCESS_KEY (upload step only)
+#   R2_S3_ENDPOINT, R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY (upload step only)
 #     R2 token: Object Read & Write, public tiles bucket only
 
 name: Fuel
@@ -53,8 +53,8 @@ jobs:
       - name: Publish
         env:
           R2_S3_ENDPOINT: ${{ secrets.R2_S3_ENDPOINT }}
-          R2_ACCESS_KEY_ID: ${{ secrets.FUEL_R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.FUEL_R2_SECRET_ACCESS_KEY }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: KIND=fuel node publish.mjs
 
       # The query string skips the edge cache, so this reads what R2 now holds.
