@@ -7,19 +7,28 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import zlib from 'node:zlib';
+import crypto from 'node:crypto';
 import { MAX_TILE_BYTES, PER_DEGREE } from './query.mjs';
+import { encodeTile, TAGS } from '../format/roadTile.mjs';
 
 // Ways Overpass would also return but a truck can never drive. The app's name match would
 // otherwise happily snap a route onto a footpath that shares a street's name.
 export const NOT_FOR_VEHICLES = new Set(['footway', 'path', 'cycleway', 'steps', 'pedestrian', 'bridleway', 'corridor',
   'proposed', 'construction', 'platform', 'elevator']);
+// v2 also keeps roads with no name or number in the classes a truck uses, so pickup and delivery legs have real
+// geometry; tracks, driveways and parking aisles stay out (plan 1.1).
+const NOT_FOR_TRUCKS_UNNAMED = new Set(['track', 'bus_guideway', 'raceway', 'escape', 'busway']);
+const UNNAMED_SERVICE_OUT = new Set(['parking_aisle', 'driveway', 'drive-through']);
+export const keepUnnamed = (p) => !NOT_FOR_TRUCKS_UNNAMED.has(p.highway) && !(p.highway === 'service' && UNNAMED_SERVICE_OUT.has(p.service));
 const clean = (s) => (s ?? '').replace(/[\t\r\n]/g, ' ');
 const r5 = (x) => Math.round(x * 1e5) / 1e5; // ~1 m, far finer than a route needs
 
-// One GeoJSON feature from `osmium export` → [tile line, tile keys], or null to skip it.
+// One GeoJSON feature from `osmium export` → { v1, v2, keys } (v1 null for an unnamed road), or null to skip it.
 export function toLine(feature) {
   const p = feature.properties ?? {};
-  if (NOT_FOR_VEHICLES.has(p.highway) || !(p.ref || p.name) || feature.geometry?.type !== 'LineString') return null;
+  if (NOT_FOR_VEHICLES.has(p.highway) || feature.geometry?.type !== 'LineString') return null;
+  const named = Boolean(p.ref || p.name);
+  if (!named && !keepUnnamed(p)) return null;
   const pts = feature.geometry.coordinates.map(([lon, lat]) => [r5(lat), r5(lon)]);
   // Every tile any segment's bounding box touches: a superset of the tiles the line crosses,
   // which is what the worker needs, since it reads only the tiles under the asked box.
@@ -29,35 +38,40 @@ export function toLine(feature) {
     for (let r = Math.floor(Math.min(a[0], b[0]) * PER_DEGREE); r <= Math.floor(Math.max(a[0], b[0]) * PER_DEGREE); r++)
       for (let c = Math.floor(Math.min(a[1], b[1]) * PER_DEGREE); c <= Math.floor(Math.max(a[1], b[1]) * PER_DEGREE); c++) keys.add(`${r}_${c}`);
   }
-  return [`${p['@id']}\t${clean(p.ref)}\t${clean(p.name)}\t${pts.flat().join(',')}\n`, keys];
+  const head = `${p['@id']}\t${clean(p.ref)}\t${clean(p.name)}\t${pts.flat().join(',')}`;
+  const tags = Object.fromEntries(TAGS.filter((t) => p[t] != null).map((t) => [t, String(p[t])]));
+  return { v1: named ? `${head}\n` : null, v2: `${head}\t${JSON.stringify(tags)}\n`, keys };
 }
 
 async function add(work) {
-  const raw = path.join(work, 'raw');
+  const raw = path.join(work, 'raw'), raw2 = path.join(work, 'raw2');
   fs.mkdirSync(raw, { recursive: true });
-  const buffered = new Map();
-  let bytes = 0, ways = 0;
+  fs.mkdirSync(raw2, { recursive: true });
+  const buffered = new Map(), buffered2 = new Map();
+  let bytes = 0, ways = 0, named = 0;
   const flush = () => {
     for (const [key, lines] of buffered) fs.appendFileSync(path.join(raw, key), lines.join(''));
-    buffered.clear();
+    for (const [key, lines] of buffered2) fs.appendFileSync(path.join(raw2, key), lines.join(''));
+    buffered.clear(); buffered2.clear();
     bytes = 0;
   };
+  const push = (map, key, line) => { if (!map.has(key)) map.set(key, []); map.get(key).push(line); bytes += line.length; };
   for await (const text of readline.createInterface({ input: process.stdin, crlfDelay: Infinity })) {
     if (!text.trim()) continue;
     const out = toLine(JSON.parse(text.replace(/^\x1e/, '')));
     if (!out) continue;
     ways++;
-    for (const key of out[1]) {
-      if (!buffered.has(key)) buffered.set(key, []);
-      buffered.get(key).push(out[0]);
-      bytes += out[0].length;
+    if (out.v1) named++;
+    for (const key of out.keys) {
+      if (out.v1) push(buffered, key, out.v1);
+      push(buffered2, key, out.v2);
     }
     if (bytes > 256e6) flush();
   }
   flush();
   // A state with no roads means the download or the export went wrong, not an empty state.
-  if (!ways) throw new Error('no roads in this extract');
-  console.log(`  ${ways} ways`);
+  if (!named) throw new Error('no roads in this extract');
+  console.log(`  ${named} named ways, ${ways} for v2`);
 }
 
 // Dedupes a tile's lines by way id (border tiles get the same way from two states) and packs
@@ -92,6 +106,29 @@ export function packTile(lines) {
   return Buffer.concat([head, refs, names, ...members]);
 }
 
+// v2: each tile stored once under its SHA-256 and listed in the build's manifest with its size, so a listed tile
+// that is missing is an error, never "no roads here" (plan 1.1, spec section 4).
+function packTilesV2(work) {
+  const raw2 = path.join(work, 'raw2'), out = path.join(work, 'tiles2');
+  fs.mkdirSync(out, { recursive: true });
+  const tiles = {};
+  let bytes = 0;
+  for (const key of fs.readdirSync(raw2).sort()) {
+    const ways = fs.readFileSync(path.join(raw2, key), 'utf8').split('\n').filter(Boolean).map((line) => {
+      const [id, ref, name, flat, tags] = line.split('\t');
+      return { id, ref, name, coords: flat.split(',').map(Number), tags: JSON.parse(tags) };
+    });
+    const tile = encodeTile(ways);
+    if (tile.length > MAX_TILE_BYTES) throw new Error(`v2 tile ${key} is ${tile.length} bytes, over ${MAX_TILE_BYTES}`);
+    const sha256 = crypto.createHash('sha256').update(tile).digest('hex');
+    fs.writeFileSync(path.join(out, `${sha256}.bin`), tile);
+    tiles[key] = { key: `roads/v2/objects/${sha256}.bin`, sha256, bytes: tile.length };
+    fs.rmSync(path.join(raw2, key));
+    bytes += tile.length;
+  }
+  return { tiles, bytes };
+}
+
 function finish(work) {
   const raw = path.join(work, 'raw'), tiles = path.join(work, 'tiles');
   fs.mkdirSync(tiles, { recursive: true });
@@ -110,6 +147,15 @@ function finish(work) {
   const build = { buildId: builtAt.replace(/[-:]/g, ''), builtAt, tileCount, sourceDates };
   fs.writeFileSync(path.join(work, 'build.json'), JSON.stringify(build, null, 1) + '\n');
   console.log(`${tileCount} tiles, ${(bytes / 1e6).toFixed(1)} MB`);
+  const v2 = packTilesV2(work);
+  const manifest = {
+    schema: 2, buildId: build.buildId, builtAt, grid: { perDegree: PER_DEGREE },
+    // Coverage is the states built; a tile key absent from `tiles` is empty only inside them.
+    coverage: { states: Object.keys(sourceDates).sort(), complete: true },
+    sourceDates, tiles: v2.tiles,
+  };
+  fs.writeFileSync(path.join(work, 'manifest2.json'), JSON.stringify(manifest) + '\n');
+  console.log(`v2: ${Object.keys(v2.tiles).length} tiles, ${(v2.bytes / 1e6).toFixed(1)} MB`);
 }
 
 const [cmd, work] = process.argv.slice(2);

@@ -1,0 +1,23 @@
+{
+  "name": "@routeall/map-format",
+  "version": "2.0.0",
+  "description": "The one encoder and decoder for RouteAll's road tiles and state boundaries.",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    "./roadTile": {
+      "types": "./roadTile.d.ts",
+      "default": "./roadTile.mjs"
+    },
+    "./stateBoundary": {
+      "types": "./stateBoundary.d.ts",
+      "default": "./stateBoundary.mjs"
+    }
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "fflate": "0.8.2"
+  }
+}

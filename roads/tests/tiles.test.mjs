@@ -10,7 +10,7 @@ const BOX = '39.05,-75.95,39.95,-75.05';
 
 const feature = (id, tags, coords) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: { '@id': id, highway: 'motorway', ...tags } });
 // A tile exactly as build.sh makes it: toLine for each way, then packTile.
-const tile = (...features) => packTile(features.map((f) => toLine(f)[0]).join('').split('\n'));
+const tile = (...features) => packTile(features.map((f) => toLine(f).v1).join('').split('\n'));
 const bytes = (b) => b.buffer.slice(b.byteOffset, b.byteOffset + b.length);
 const I95 = feature(11, { ref: 'I 95' }, [[-75.6, 39.5], [-75.5, 39.6]]);
 const I295 = feature(12, { ref: 'I 295;US 40', name: 'Delaware Memorial Bridge' }, [[-75.52, 39.68], [-75.5, 39.69]]);
@@ -56,14 +56,15 @@ test('tile math: keys, the app box covers 16 tiles, and a way crossing tiles is 
   assert.equal(tileKey(-0.1, 0.1), '-1_0');
   assert.equal(tilesFor(parseQuery(refQ('95', BOX)).box).length, 16);
   assert.ok(tilesFor({ s: 39, w: -80, n: 41, e: -78 }).length > MAX_TILES);
-  assert.deepEqual([...toLine(feature(1, { ref: 'I 95' }, [[-75.9, 39.1], [-75.6, 39.1]]))[1]], ['156_-304', '156_-303']);
+  assert.deepEqual([...toLine(feature(1, { ref: 'I 95' }, [[-75.9, 39.1], [-75.6, 39.1]])).keys], ['156_-304', '156_-303']);
 });
 
 test('build lines keep 5 decimals and drop roads a truck cannot use or the app cannot match', () => {
-  assert.equal(toLine(feature(5, { ref: 'I 95' }, [[-75.1234567, 39.7654321]]))[0], '5\tI 95\t\t39.76543,-75.12346\n');
+  assert.equal(toLine(feature(5, { ref: 'I 95' }, [[-75.1234567, 39.7654321]])).v1, '5\tI 95\t\t39.76543,-75.12346\n');
   assert.equal(toLine({ ...feature(6, { name: 'Main St' }, [[0, 0]]), properties: { '@id': 6, highway: 'footway', name: 'Main St' } }), null);
-  assert.equal(toLine(feature(7, {}, [[0, 0]])), null); // no ref, no name
-  assert.equal(toLine(feature(8, { name: 'Tab\tName' }, [[0, 0]]))[0], '8\t\tTab Name\t0,0\n');
+  assert.equal(toLine(feature(7, {}, [[0, 0]])).v1, null); // no ref, no name: v2 only
+  assert.equal(toLine({ ...feature(9, {}, [[0, 0]]), properties: { '@id': 9, highway: 'service', service: 'driveway' } }), null); // a driveway: neither
+  assert.equal(toLine(feature(8, { name: 'Tab\tName' }, [[0, 0]])).v1, '8\t\tTab Name\t0,0\n');
 });
 
 test('a way counts when any segment crosses the box, even with no node inside', () => {
@@ -102,5 +103,5 @@ test('the reference decoder refuses to decode more than its budget', () => {
 });
 
 test('a tile holds each distinct ref/name once and drops a way seen twice', () => {
-  assert.deepEqual(packTile([toLine(I95)[0], toLine(I95)[0], toLine(I295)[0]].join('').split('\n')), tile(I95, I295));
+  assert.deepEqual(packTile([toLine(I95).v1, toLine(I95).v1, toLine(I295).v1].join('').split('\n')), tile(I95, I295));
 });
