@@ -35,16 +35,6 @@ const DAY = 86_400_000;
 const ROLLBACK = process.env.ROLLBACK === '1';
 const KIND = process.env.KIND ?? 'roads';
 
-// STORE_DIR=<folder> runs the same path into a folder, for checking it by hand.
-if (process.env.R2_ACCESS_KEY_ID || process.env.STORE_DIR) {
-  const { openStore, withLock } = await import('./store.mjs');
-  const store = await openStore(process.env.STORE_DIR);
-  const run = KIND === 'fuel' ? publishFuel : KIND === 'roads2' ? (st, h) => publishAddressed(st, h, ROADS_V2)
-    : KIND === 'boundaries' ? (st, h) => publishAddressed(st, h, BOUNDARIES) : publishBuild;
-  await withLock(store, KIND, (KIND === 'fuel' ? 1 : 6) * 3_600_000, (holding) => run(store, holding));
-  process.exit(0);
-}
-
 /*
   Content-addressed data (road tiles v2, state boundaries; plan 1.5, spec section 5): each object is named by its
   SHA-256 and never changes, a build is a manifest listing the objects it uses, and <prefix>/current.json points at
@@ -66,6 +56,17 @@ export const stampOf = (id) => Date.parse(id.replace(/^(\d{4})(\d\d)(\d\d)T(\d\d
 /** Manifests to keep: built within RETAIN_DAYS, or current, or previous. */
 export function retainedBuilds(ids, current, previous, now = Date.now()) {
   return ids.filter((id) => id === current || id === previous || now - stampOf(id) <= RETAIN_DAYS * DAY);
+}
+
+
+// STORE_DIR=<folder> runs the same path into a folder, for checking it by hand.
+if (process.env.R2_ACCESS_KEY_ID || process.env.STORE_DIR) {
+  const { openStore, withLock } = await import('./store.mjs');
+  const store = await openStore(process.env.STORE_DIR);
+  const run = KIND === 'fuel' ? publishFuel : KIND === 'roads2' ? (st, h) => publishAddressed(st, h, ROADS_V2)
+    : KIND === 'boundaries' ? (st, h) => publishAddressed(st, h, BOUNDARIES) : publishBuild;
+  await withLock(store, KIND, (KIND === 'fuel' ? 1 : 6) * 3_600_000, (holding) => run(store, holding));
+  process.exit(0);
 }
 
 async function publishAddressed(store, holding, kind) {
