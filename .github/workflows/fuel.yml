@@ -1,0 +1,66 @@
+# Weekly fuel averages (roads/fuel.mjs).
+#
+# EIA publishes the week's diesel and regular gasoline prices on Monday afternoon (Eastern); this
+# fetches them on Tuesday and publishes fuel/current.json. A week EIA has not fully published
+# fails the job before anything is uploaded, so phones keep last week's prices.
+#
+# Secrets:
+#   EIA_API_KEY (optional, fetch step only; EIA's DEMO_KEY is used without it)
+#   R2_S3_ENDPOINT, FUEL_R2_ACCESS_KEY_ID / FUEL_R2_SECRET_ACCESS_KEY (upload step only)
+#     R2 token: Object Read & Write, public tiles bucket only
+
+name: Fuel
+
+on:
+  schedule:
+    - cron: '17 14 * * 2' # Tuesdays 14:17 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: fuel
+  cancel-in-progress: false
+
+jobs:
+  fuel:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: roads
+        shell: bash --noprofile --norc -euo pipefail {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: roads
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Install
+        run: npm ci --omit=dev
+
+      - name: Fetch EIA prices
+        env:
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+        run: node fuel.mjs .build
+
+      - name: Publish
+        env:
+          R2_S3_ENDPOINT: ${{ secrets.R2_S3_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.FUEL_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.FUEL_R2_SECRET_ACCESS_KEY }}
+        run: KIND=fuel node publish.mjs
+
+      # The query string skips the edge cache, so this reads what R2 now holds.
+      - name: This week is live
+        run: |
+          want=$(node -p "require('./.build/fuel.json').weekOf")
+          live=$(curl -fsS "https://tiles.routeall.app/fuel/current.json?run=$GITHUB_RUN_ID" | node -p "JSON.parse(require('fs').readFileSync(0)).weekOf")
+          echo "built $want, live $live"
+          [ "$want" = "$live" ] || { echo "::error::fuel/current.json still says $live"; exit 1; }
