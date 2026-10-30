@@ -1,0 +1,99 @@
+# Daily roads and places (roads/build.sh, roads/pois.mjs).
+#
+# Asks Geofabrik first (roads/source-check.mjs) and builds only when a state has a newer extract
+# than the live build, so a new extract goes live within a day. Then cuts every US state + DC into
+# road tiles and place tiles and publishes them through R2's S3 API (roads/publish.mjs): tiles
+# first, then build.json, then <kind>/current.json last, inside a one-writer lock. Any failed step
+# stops the job before the pointer moves, and GitHub emails the failure.
+#
+# Secrets (only on the publish step):
+#   R2_S3_ENDPOINT                                    the account's R2 S3 endpoint
+#   ROADS_R2_ACCESS_KEY_ID / ROADS_R2_SECRET_ACCESS_KEY   R2 token: Object Read & Write, public tiles bucket only
+
+name: Roads
+
+on:
+  schedule:
+    - cron: '23 7 * * *' # daily 07:23 UTC, off the top of the hour
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build even if Geofabrik has nothing newer
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: roads
+  cancel-in-progress: false
+
+jobs:
+  roads:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # About 45-80 min to build; the S3 upload sends only changed tiles.
+    timeout-minutes: 300
+    defaults:
+      run:
+        working-directory: roads
+        shell: bash --noprofile --norc -euo pipefail {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Is there a newer extract?
+        id: source
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          if [ "${FORCE:-false}" = true ]; then node source-check.mjs --force; else node source-check.mjs; fi >> "$GITHUB_OUTPUT"
+
+      - name: Install
+        if: steps.source.outputs.newer == 'true'
+        run: npm ci --omit=dev
+
+      - name: Tests
+        if: steps.source.outputs.newer == 'true'
+        run: npm test
+
+      # The largest downloads (California, Texas) and their working copies need more than the
+      # ~14 GB a runner starts with; these preinstalled toolchains are never used here.
+      - name: Free disk
+        if: steps.source.outputs.newer == 'true'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
+
+      - name: Install osmium
+        if: steps.source.outputs.newer == 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool
+
+      - name: Build tiles
+        if: steps.source.outputs.newer == 'true'
+        run: ./build.sh
+
+      - name: Publish roads, then places
+        if: steps.source.outputs.newer == 'true'
+        env:
+          R2_S3_ENDPOINT: ${{ secrets.R2_S3_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.ROADS_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.ROADS_R2_SECRET_ACCESS_KEY }}
+        run: node publish.mjs && KIND=pois node publish.mjs
+
+      # Proves THIS run went live, not just that some pointer exists. The query string skips the
+      # edge cache. Reads only the public domain.
+      - name: Both builds are live
+        if: steps.source.outputs.newer == 'true'
+        run: |
+          for kind in roads pois; do
+            file=.build/build.json; [ "$kind" = pois ] && file=.build/pois.json
+            want=$(node -p "require('./$file').buildId")
+            live=$(curl -fsS "https://tiles.routeall.app/$kind/current.json?run=$GITHUB_RUN_ID" | node -p "JSON.parse(require('fs').readFileSync(0)).buildId")
+            echo "$kind: built $want, live $live"
+            [ "$want" = "$live" ] || { echo "::error::$kind/current.json still points at $live"; exit 1; }
+          done

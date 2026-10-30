@@ -1,0 +1,54 @@
+# Security
+
+## Reporting a problem
+
+Please use GitHub's private vulnerability reporting: the **Security** tab of this repository,
+then **Report a vulnerability**. Do not open a public issue for anything that could expose a
+credential or let someone change published data.
+
+## Credential model
+
+- **One R2 S3 API token per dataset write path**, held as encrypted Actions secrets and passed
+  only as environment variables to the single step that publishes:
+  - `ROADS_R2_ACCESS_KEY_ID` / `ROADS_R2_SECRET_ACCESS_KEY` — roads and places (`roads.yml`)
+  - `EVENTS_R2_ACCESS_KEY_ID` / `EVENTS_R2_SECRET_ACCESS_KEY` — road work (`road-work.yml`)
+  - `FUEL_R2_ACCESS_KEY_ID` / `FUEL_R2_SECRET_ACCESS_KEY` — fuel (`fuel.yml`)
+  - `R2_S3_ENDPOINT` — the account's R2 S3 endpoint (a secret because it names the account)
+- Each token is an R2 API token with **Object Read & Write on the public tiles bucket only**.
+  Cloudflare offers no write-only object permission, and the publishers need to read the live
+  pointer and list objects for clean-up, so Read & Write on that one bucket is the narrowest scope.
+  R2 cannot scope a token to a key prefix, so the three tokens can each write the whole public
+  bucket; they exist separately so one can be revoked or rotated without stopping the others.
+- None of these tokens can reach any other bucket (including private route storage), Workers
+  deploys, DNS, zone settings or any database. Worker deploys, private storage and everything
+  else stay in the private application repository with their own credentials.
+- Optional read-only feed keys: `WZDX_KEYS` (road-work step only) and `EIA_API_KEY` (fuel fetch
+  step only).
+- Workflows declare `permissions: {}` at the top and grant `contents: read` per job. Only the
+  keepalive job has `contents: write`, and it holds no bucket token. Checkouts use
+  `persist-credentials: false`. Triggers are `schedule` and `workflow_dispatch` only; never
+  `pull_request_target`, so a fork's pull request never runs with secrets.
+- Every action is pinned to a full commit SHA, with its version in a comment; Dependabot proposes
+  updates as reviewed pull requests.
+- One writer per dataset: each publisher takes a lease object in the bucket before writing, so a
+  manual run and a scheduled run (or another repository) can never publish the same dataset at
+  once.
+
+## Repository settings to enable (owner checklist)
+
+- [ ] **Secret scanning** and **push protection** (Settings → Code security).
+- [ ] **Private vulnerability reporting** (Settings → Code security).
+- [ ] **Dependabot alerts** and **security updates**.
+- [ ] **Branch protection / ruleset on `main`**: pull request required, at least one approving
+      review, review from Code Owners, dismiss stale approvals, no force pushes, no deletion.
+      Add one bypass for the GitHub Actions app so `keepalive.yml` can push
+      `status/roads-build.json` (it is the only job with `contents: write`).
+- [ ] **Actions → General**: allow only actions created by GitHub, restricted to
+      `actions/checkout` and `actions/setup-node`; require SHA pinning if offered.
+- [ ] **Actions → General → Fork pull request workflows**: require approval for all outside
+      contributors; do not send secrets or write tokens to fork pull requests.
+- [ ] **Actions → General → Workflow permissions**: default `GITHUB_TOKEN` to read-only, and do
+      not allow Actions to create or approve pull requests.
+- [ ] **Secrets**: only the names listed above, as repository (not organisation-wide) Actions
+      secrets. No personal access tokens or admin tokens at repository level.
+- [ ] **Collaborators**: maintainers only; no outside collaborators with write access.

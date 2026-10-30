@@ -1,0 +1,13 @@
+# Pinned action SHAs and npm packages get reviewed update PRs. Dependabot keeps the
+# "# vX.Y.Z" comment beside each pinned SHA in step with the SHA.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /roads
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
