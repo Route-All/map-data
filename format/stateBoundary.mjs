@@ -76,10 +76,10 @@ export function distanceToEdge(p, rings, box) {
  * The state a point ([lon, lat]) is in, as StateEvidence:
  *   { kind: 'inside', state } | { kind: 'boundary', states, distanceMeters } | { kind: 'outside_us' }
  *   | { kind: 'unavailable', reason }
- * `boundary` when the point is within `boundaryMeters` of a line between states (or the coast): the caller decides
- * with the permit's own crossing, or asks for review. `getBlock(blockKey)` resolves to the decoded block, or null.
+ * `boundary` when the point is within `boundaryMeters` of a line between states, or in no state but within
+ * `coastMeters` of one (offshore, across a border river): the caller decides with the permit's own crossing, or asks. `getBlock(blockKey)` resolves to the decoded block, or null.
  */
-export async function stateAt(index, getBlock, point, { boundaryMeters = 30 } = {}) {
+export async function stateAt(index, getBlock, point, { boundaryMeters = 30, coastMeters = 2000 } = {}) {
   if (!index || index.schema !== SCHEMA) return { kind: 'unavailable', reason: 'no boundary index' };
   const cell = cellKey(point[0], point[1]), entry = index.cells[cell];
   if (entry === undefined) return { kind: 'outside_us' };
@@ -97,7 +97,12 @@ export async function stateAt(index, getBlock, point, { boundaryMeters = 30 } = 
     return { kind: 'boundary', states: all, distanceMeters: Math.min(...near.map((x) => x.d)) };
   }
   if (containing.length === 1) return { kind: 'inside', state: containing[0] };
-  if (!containing.length) return { kind: 'outside_us' };
+  if (!containing.length) {
+    // In no state but beside one (water off the coast, a lake shore, the far side of a river border): the source
+    // polygons and other maps disagree here, so it is never a certain "outside the US"; the caller asks again.
+    const coast = states.map((s) => ({ s, d: distanceToEdge(point, pieces[s], box) })).filter((x) => x.d <= coastMeters);
+    return coast.length ? { kind: 'boundary', states: coast.map((x) => x.s), distanceMeters: Math.min(...coast.map((x) => x.d)) } : { kind: 'outside_us' };
+  }
   return { kind: 'boundary', states: containing, distanceMeters: 0 }; // overlapping source polygons: never guess
 }
 

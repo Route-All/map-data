@@ -7,7 +7,8 @@ const sq = (w, s, e, n) => [[w, s], [e, s], [e, n], [w, n]];
 const A = { code: 'AA', polygons: [[sq(0, 0, 1.1, 1), sq(0.3, 0.3, 0.35, 0.35)]] };
 const B = { code: 'BB', polygons: [[sq(1.1, 0, 2, 1)]] };
 const C = { code: 'CC', polygons: [[sq(0.3, 0.3, 0.35, 0.35)]] };
-const grid = buildGrid([A, B, C]);
+const D = { code: 'DD', polygons: [[sq(3, 0, 3.1, 1)]] }; // its east edge, lon 3.1, is a coast inside a cell
+const grid = buildGrid([A, B, C, D]);
 const blocks = JSON.parse(JSON.stringify(grid.blocks)); // as it comes back from storage
 const get = async (k) => blocks[k] ?? null;
 
@@ -36,6 +37,9 @@ test('a hole is its own state (DC inside Maryland), not the surrounding one', as
 
 test('outside every state is outside_us; a missing block is unavailable, never a guess', async () => {
   assert.deepEqual(await stateAt(grid.index, get, [5, 5]), { kind: 'outside_us' });
+  // In a cell a coast crosses, beside a state but in none: not a certain answer.
+  assert.deepEqual(await stateAt(grid.index, get, [3.11, 0.5]).then((r) => [r.kind, r.states]), ['boundary', ['DD']]);
+  assert.deepEqual(await stateAt(grid.index, get, [3.2, 0.5]), { kind: 'outside_us' }); // 11 km out: certain
   assert.equal((await stateAt(grid.index, async () => null, [1.15, 0.5])).kind, 'unavailable');
   assert.equal((await stateAt(null, get, [0.1, 0.1])).kind, 'unavailable');
 });

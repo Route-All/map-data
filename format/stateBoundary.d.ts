@@ -16,5 +16,5 @@ export declare function decodeJson<T = unknown>(bytes: Uint8Array | ArrayBuffer)
 export declare function clipRing(ring: LonLat[], box: { west: number; south: number; east: number; north: number }): LonLat[];
 export declare function inRings(p: LonLat, rings: LonLat[][]): boolean;
 export declare function distanceToEdge(p: LonLat, rings: LonLat[][], box?: { west: number; south: number; east: number; north: number }): number;
-export declare function stateAt(index: BoundaryIndex | null, getBlock: (blockKey: string) => Promise<BoundaryBlock | null>, point: LonLat, opts?: { boundaryMeters?: number }): Promise<StateEvidence>;
+export declare function stateAt(index: BoundaryIndex | null, getBlock: (blockKey: string) => Promise<BoundaryBlock | null>, point: LonLat, opts?: { boundaryMeters?: number; coastMeters?: number }): Promise<StateEvidence>;
 export declare function buildGrid(states: { code: string; polygons: LonLat[][][] }[], opts?: { round?: number }): { index: BoundaryIndex; blocks: Record<string, BoundaryBlock> };
