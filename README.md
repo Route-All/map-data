@@ -44,7 +44,6 @@ least 35 days. Each road-work manifest says, per feed and per tile, whether the 
   (`source-check.mjs`), the freshness check (`freshness.mjs`) and tests.
 - `.github/workflows/` — `roads.yml` (daily), `road-work.yml` (hourly at :17), `fuel.yml` (weekly),
   `keepalive.yml` (monthly).
-- `status/roads-build.json` — the live road build's manifest, committed monthly by the keepalive.
 
 ## Running by hand
 

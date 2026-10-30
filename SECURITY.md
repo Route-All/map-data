@@ -22,8 +22,8 @@ credential or let someone change published data.
   else stay in the private application repository with their own credentials.
 - Optional read-only feed keys: `WZDX_KEYS` (road-work step only) and `EIA_API_KEY` (fuel fetch
   step only).
-- Workflows declare `permissions: {}` at the top and grant `contents: read` per job. Only the
-  keepalive job has `contents: write`, and it holds no bucket token. Checkouts use
+- Workflows declare `permissions: {}` at the top and grant `contents: read` per job. The keepalive
+  job has only `actions: write` (it re-enables the schedules) and holds no bucket token. Checkouts use
   `persist-credentials: false`. Triggers are `schedule` and `workflow_dispatch` only; never
   `pull_request_target`, so a fork's pull request never runs with secrets.
 - Every action is pinned to a full commit SHA, with its version in a comment; Dependabot proposes
@@ -39,8 +39,6 @@ credential or let someone change published data.
 - [ ] **Dependabot alerts** and **security updates**.
 - [ ] **Branch protection / ruleset on `main`**: pull request required, at least one approving
       review, review from Code Owners, dismiss stale approvals, no force pushes, no deletion.
-      Add one bypass for the GitHub Actions app so `keepalive.yml` can push
-      `status/roads-build.json` (it is the only job with `contents: write`).
 - [ ] **Actions → General**: allow only actions created by GitHub, restricted to
       `actions/checkout` and `actions/setup-node`; require SHA pinning if offered.
 - [ ] **Actions → General → Fork pull request workflows**: require approval for all outside
