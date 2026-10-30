@@ -14,10 +14,11 @@ STATES=${STATES:-"alabama alaska arizona arkansas california colorado connecticu
   ohio oklahoma oregon pennsylvania rhode-island south-carolina south-dakota tennessee texas utah vermont virginia
   washington west-virginia wisconsin wyoming"}
 WORK=${WORK:-.build}
-rm -rf "$WORK/raw" "$WORK/tiles" "$WORK/sources.txt" "$WORK/build.json" "$WORK/pois-raw" "$WORK/pois" "$WORK/pois.json" "$WORK/extras.jsonl" "$WORK/signs.jsonl" "$WORK/weigh-station-gaps.geojson"
+rm -rf "$WORK/raw" "$WORK/raw2" "$WORK/tiles" "$WORK/tiles2" "$WORK/manifest2.json" "$WORK/sources.txt" "$WORK/build.json" "$WORK/pois-raw" "$WORK/pois" "$WORK/pois.json" "$WORK/extras.jsonl" "$WORK/signs.jsonl" "$WORK/weigh-station-gaps.geojson"
 mkdir -p "$WORK/pbf"
-# Only the three tags the app reads. area_tags=false keeps closed ways (roundabouts) as lines.
-echo '{"attributes":{"id":true},"linear_tags":true,"area_tags":false,"include_tags":["highway","ref","name"]}' > "$WORK/export.json"
+# The tags the app reads plus v2's raw evidence (format/roadTile.mjs TAGS). area_tags=false keeps closed ways
+# (roundabouts) as lines.
+echo '{"attributes":{"id":true},"linear_tags":true,"area_tags":false,"include_tags":["highway","ref","name","oneway","junction","service","layer","bridge","tunnel","access","hgv","maxheight","maxwidth","maxweight"]}' > "$WORK/export.json"
 echo '{"attributes":{"id":true},"linear_tags":true,"area_tags":false,"include_tags":["highway","ref","destination","destination:lanes","destination:street","exit_to"]}' > "$WORK/signs.json"
 # Places (pois.mjs): the tags that say what a place is and what it offers a truck.
 echo '{"attributes":{"id":true},"linear_tags":false,"area_tags":true,"include_tags":["amenity","highway","name","brand","hgv","fuel","fuel:diesel","fuel:HGV_diesel","shower","showers","food","restaurant","opening_hours","phone","contact:phone","capacity:hgv","truck_wash","addr:housenumber","addr:street","addr:city"]}' > "$WORK/places.json"
@@ -33,10 +34,10 @@ for state in $STATES; do
     "https://download.geofabrik.de/north-america/us/$state-latest.osm.pbf"
   echo "$state $(osmium fileinfo -g header.option.osmosis_replication_timestamp "$pbf")" >> "$WORK/sources.txt"
   osmium tags-filter "$pbf" w/highway -o "$WORK/highways.pbf" --overwrite
-  osmium tags-filter "$WORK/highways.pbf" w/ref w/name -o "$WORK/named.pbf" --overwrite
-  osmium export "$WORK/named.pbf" -c "$WORK/export.json" -f geojsonseq -x print_record_separator=false \
+  # Every highway way: tile.mjs keeps named ones for v1 and adds the unnamed truck classes for v2.
+  osmium export "$WORK/highways.pbf" -c "$WORK/export.json" -f geojsonseq -x print_record_separator=false \
     --geometry-types=linestring -o - | node tile.mjs add "$WORK"
-  rm -f "$WORK/highways.pbf" "$WORK/named.pbf"
+  rm -f "$WORK/highways.pbf"
   osmium tags-filter "$pbf" nwr/amenity=fuel,weighbridge,parking,car_wash nwr/highway=rest_area,services \
     -o "$WORK/places-full.pbf" --overwrite
   # Freeways, trunk roads and ramps: an unnamed scale beside one is a weigh station, elsewhere a private scale.

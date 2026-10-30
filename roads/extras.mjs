@@ -120,18 +120,30 @@ async function getJson(url) {
   }
 }
 
+// One broken spider in a run (Pilot Flying J's file was empty in the 2026-10-17 run) must not stop the build or
+// drop the chain: each spider takes the newest of the last few runs that has it above its floor.
+const ATP_HISTORY = 'https://data.alltheplaces.xyz/runs/history.json';
+const ATP_RUNS_BACK = 4;
+
 async function atp() {
   const latest = await getJson(ATP_LATEST);
-  const base = latest.output_url.replace(/\/output\.zip$/, '');
-  const rows = [];
+  const history = await getJson(ATP_HISTORY).catch(() => []);
+  const runs = [latest, ...history.filter((r) => r.output_url && r.run_id !== latest.run_id).reverse()].slice(0, ATP_RUNS_BACK);
+  const rows = [], used = {};
   for (const spider of Object.keys(SPIDERS)) {
-    const json = await getJson(`${base}/output/${spider}.geojson`);
-    const got = json.features.map((f) => fromAtp(spider, f)).filter(Boolean);
-    console.log(`  ${spider}: ${got.length}`);
-    if (got.length < SPIDERS[spider].floor) throw new Error(`${spider} returned ${got.length}, expected at least ${SPIDERS[spider].floor}`);
+    let got = null;
+    for (const run of runs) {
+      const base = run.output_url.replace(/\/output\.zip$/, '');
+      const json = await getJson(`${base}/output/${spider}.geojson`).catch(() => null);
+      const these = (json?.features ?? []).map((f) => fromAtp(spider, f)).filter(Boolean);
+      if (these.length >= SPIDERS[spider].floor) { got = these; used[spider] = run.run_id; break; }
+      console.log(`  ${spider}: ${these.length} in run ${run.run_id}, trying an earlier run`);
+    }
+    if (!got) throw new Error(`${spider}: under ${SPIDERS[spider].floor} places in each of the last ${runs.length} runs`);
+    console.log(`  ${spider}: ${got.length}${used[spider] === latest.run_id ? '' : ` (run ${used[spider]})`}`);
     rows.push(...got);
   }
-  return { rows, run: latest.run_id };
+  return { rows, run: latest.run_id, runs: used };
 }
 
 async function ntad() {

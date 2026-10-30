@@ -1,0 +1,52 @@
+# Independent freshness check of the published data (roads/freshness.mjs).
+#
+# Reads only the public files at tiles.routeall.app and fails when any dataset is stale: road work
+# not published for 3 h or a feed not checked for 24 h, a feed's rows halved, roads 35 days old,
+# fuel 15 days old. A failed run is the alert: GitHub emails the failure to the person who last
+# changed this workflow's schedule (the repo owner), so a publisher that stops silently is caught
+# within hours. It is a separate workflow from the publishers on purpose, so it still runs when
+# they stop or are disabled.
+#
+# Needs no secrets and no npm install (Node's own fetch only).
+
+name: Freshness
+
+on:
+  schedule:
+    - cron: '47 */3 * * *' # every 3 hours at :47, off the publishers' minutes
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: freshness
+  cancel-in-progress: true
+
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: roads
+        shell: bash --noprofile --norc -euo pipefail {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: roads
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      # Each ALERT line also becomes an error annotation, so the failure email names the problem.
+      - name: Check published data age
+        run: |
+          status=0
+          node freshness.mjs > "$RUNNER_TEMP/freshness.txt" || status=$?
+          cat "$RUNNER_TEMP/freshness.txt"
+          sed -n 's/^ALERT /::error::/p' "$RUNNER_TEMP/freshness.txt"
+          exit "$status"
