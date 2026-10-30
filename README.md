@@ -43,7 +43,7 @@ least 35 days. Each road-work manifest says, per feed and per tile, whether the 
   publisher (`publish.mjs`, `events.mjs`), the storage adapter (`store.mjs`), the Geofabrik check
   (`source-check.mjs`), the freshness check (`freshness.mjs`) and tests.
 - `.github/workflows/` — `roads.yml` (daily), `road-work.yml` (hourly at :17), `fuel.yml` (weekly),
-  `keepalive.yml` (monthly).
+  `freshness.yml` (every 3 h), `keepalive.yml` (monthly).
 
 ## Running by hand
 
@@ -57,6 +57,18 @@ STORE_DIR=/tmp/out node publish.mjs       # publish that build into /tmp/out
 node freshness.mjs                        # check the published data's age; exits 1 with ALERT lines
 npm test
 ```
+
+## Freshness alert
+
+`freshness.yml` runs `freshness.mjs` every 3 hours against the live public files, separately from
+the publishers, so it still notices when a publisher has stopped. It fails when road work has not
+been published for 3 h, a road-work feed has not been checked for 24 h, a feed's rows fall by more
+than half, the road build is 35 days old or fuel prices are 15 days old. **A failed run is the
+alert:** GitHub emails it to the person who last changed that workflow's schedule, so the owner
+should be the last to edit its `cron` line and keep Actions failure emails on (Settings →
+Notifications → Actions). Each problem appears as an error line in the run and the email. It needs
+no secrets. If GitHub ever disables this repository's schedules (60 days without activity), the
+check stops with them; `keepalive.yml` prevents that.
 
 Production runs only through the scheduled workflows. See [SECURITY.md](SECURITY.md) for the
 credential model.

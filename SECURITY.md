@@ -22,6 +22,8 @@ credential or let someone change published data.
   else stay in the private application repository with their own credentials.
 - Optional read-only feed keys: `WZDX_KEYS` (road-work step only) and `EIA_API_KEY` (fuel fetch
   step only).
+- `freshness.yml` holds no secrets at all: it reads the public files and fails (emailing the
+  owner) when data is stale.
 - Workflows declare `permissions: {}` at the top and grant `contents: read` per job. The keepalive
   job has only `actions: write` (it re-enables the schedules) and holds no bucket token. Checkouts use
   `persist-credentials: false`. Triggers are `schedule` and `workflow_dispatch` only; never
@@ -47,4 +49,7 @@ credential or let someone change published data.
       not allow Actions to create or approve pull requests.
 - [ ] **Secrets**: only the names listed above, as repository (not organisation-wide) Actions
       secrets. No personal access tokens or admin tokens at repository level.
+- [ ] **Freshness emails**: the owner is the last person to edit `freshness.yml`'s `cron` line
+      (GitHub sends scheduled-run failures to that person) and has Actions failure notifications
+      on (Settings → Notifications → Actions → "Send notifications for failed workflows only").
 - [ ] **Collaborators**: maintainers only; no outside collaborators with write access.
