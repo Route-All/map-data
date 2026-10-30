@@ -20,6 +20,9 @@ export const NOT_FOR_VEHICLES = new Set(['footway', 'path', 'cycleway', 'steps',
 const NOT_FOR_TRUCKS_UNNAMED = new Set(['track', 'bus_guideway', 'raceway', 'escape', 'busway']);
 const UNNAMED_SERVICE_OUT = new Set(['parking_aisle', 'driveway', 'drive-through']);
 export const keepUnnamed = (p) => !NOT_FOR_TRUCKS_UNNAMED.has(p.highway) && !(p.highway === 'service' && UNNAMED_SERVICE_OUT.has(p.service));
+// v2 is read straight from R2 (no Worker), so its cap is only a sanity bound: dense tiles are never pruned to fit
+// (spec section 4). Boston's is 3.8 MB; New York's will be larger.
+const V2_MAX_TILE_BYTES = 16 * 1024 * 1024;
 const clean = (s) => (s ?? '').replace(/[\t\r\n]/g, ' ');
 const r5 = (x) => Math.round(x * 1e5) / 1e5; // ~1 m, far finer than a route needs
 
@@ -119,7 +122,7 @@ function packTilesV2(work) {
       return { id, ref, name, coords: flat.split(',').map(Number), tags: JSON.parse(tags) };
     });
     const tile = encodeTile(ways);
-    if (tile.length > MAX_TILE_BYTES) throw new Error(`v2 tile ${key} is ${tile.length} bytes, over ${MAX_TILE_BYTES}`);
+    if (tile.length > V2_MAX_TILE_BYTES) throw new Error(`v2 tile ${key} is ${tile.length} bytes, over ${V2_MAX_TILE_BYTES}`);
     const sha256 = crypto.createHash('sha256').update(tile).digest('hex');
     fs.writeFileSync(path.join(out, `${sha256}.bin`), tile);
     tiles[key] = { key: `roads/v2/objects/${sha256}.bin`, sha256, bytes: tile.length };

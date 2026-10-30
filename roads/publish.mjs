@@ -39,8 +39,77 @@ const KIND = process.env.KIND ?? 'roads';
 if (process.env.R2_ACCESS_KEY_ID || process.env.STORE_DIR) {
   const { openStore, withLock } = await import('./store.mjs');
   const store = await openStore(process.env.STORE_DIR);
-  await withLock(store, KIND, (KIND === 'fuel' ? 1 : 6) * 3_600_000, (holding) => (KIND === 'fuel' ? publishFuel(store, holding) : publishBuild(store, holding)));
+  const run = KIND === 'fuel' ? publishFuel : KIND === 'roads2' ? (st, h) => publishAddressed(st, h, ROADS_V2)
+    : KIND === 'boundaries' ? (st, h) => publishAddressed(st, h, BOUNDARIES) : publishBuild;
+  await withLock(store, KIND, (KIND === 'fuel' ? 1 : 6) * 3_600_000, (holding) => run(store, holding));
   process.exit(0);
+}
+
+/*
+  Content-addressed data (road tiles v2, state boundaries; plan 1.5, spec section 5): each object is named by its
+  SHA-256 and never changes, a build is a manifest listing the objects it uses, and <prefix>/current.json points at
+  the live manifest. A new build uploads only objects not already there, then its manifest, then the pointer LAST.
+  Clean-up is mark-and-sweep in the same lock: keep every manifest built in the last RETAIN_DAYS plus the current and
+  previous ones, re-read them all, and delete only objects none of them lists. There is no bucket age rule on these
+  objects, because a new manifest can reuse an old one.
+*/
+const RETAIN_DAYS = 35;
+const ROADS_V2 = {
+  prefix: 'roads/v2', manifest: () => path.join(WORK, 'manifest2.json'), dir: () => path.join(WORK, 'tiles2'),
+  objects: (m) => Object.values(m.tiles), local: (o) => o.key.split('/').pop(),
+};
+const BOUNDARIES = {
+  prefix: 'boundaries/v1', manifest: () => path.join(WORK, 'boundaries', 'manifest.json'), dir: () => path.join(WORK, 'boundaries', 'objects'),
+  objects: (m) => [m.index, ...Object.values(m.blocks)], local: (o) => o.key.split('/').pop(),
+};
+export const stampOf = (id) => Date.parse(id.replace(/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z$/, '$1-$2-$3T$4:$5:$6Z'));
+/** Manifests to keep: built within RETAIN_DAYS, or current, or previous. */
+export function retainedBuilds(ids, current, previous, now = Date.now()) {
+  return ids.filter((id) => id === current || id === previous || now - stampOf(id) <= RETAIN_DAYS * DAY);
+}
+
+async function publishAddressed(store, holding, kind) {
+  const { pool } = await import('./store.mjs');
+  const crypto = await import('node:crypto');
+  const manifestText = fs.readFileSync(kind.manifest(), 'utf8'), manifest = JSON.parse(manifestText);
+  const objects = kind.objects(manifest);
+  const live = await store.getJson(`${kind.prefix}/current.json`);
+  if (live && live.buildId > manifest.buildId && !ROLLBACK) throw new Error(`live ${kind.prefix} build ${live.buildId} is newer than ${manifest.buildId}; ROLLBACK=1 to go back`);
+  const have = new Set((await store.list(`${kind.prefix}/objects/`)).map((o) => o.key));
+  const missing = objects.filter((o) => !have.has(o.key));
+  console.log(`${kind.prefix} ${manifest.buildId}: ${objects.length} objects, ${missing.length} to upload; live ${live?.buildId ?? 'none'}`);
+  const t0 = Date.now();
+  await pool(missing, PARALLEL, async (o) => {
+    const bytes = fs.readFileSync(path.join(kind.dir(), kind.local(o)));
+    // The name is the promise: an object whose bytes do not hash to it never goes up.
+    if (bytes.length !== o.bytes || crypto.createHash('sha256').update(bytes).digest('hex') !== o.sha256) throw new Error(`${o.key} does not match its manifest entry`);
+    await store.put(o.key, bytes, { type: 'application/octet-stream', cache: TILE_CACHE });
+  });
+  console.log(`objects in place in ${Math.round((Date.now() - t0) / 1000)} s`);
+  const manifestKey = `${kind.prefix}/${manifest.buildId}/manifest.json`;
+  await store.put(manifestKey, manifestText, { type: 'application/json', cache: TILE_CACHE });
+  const previous = live?.buildId === manifest.buildId ? live.previous : live?.buildId;
+  await holding();
+  await store.put(`${kind.prefix}/current.json`, JSON.stringify({ buildId: manifest.buildId, manifest: manifestKey, ...(previous && { previous }) }), { type: 'application/json', cache: POINTER_CACHE });
+  console.log(`live: ${kind.prefix} ${manifest.buildId}`);
+
+  // Mark and sweep, still holding the lock.
+  const manifestKeys = (await store.list(`${kind.prefix}/`)).map((o) => o.key).filter((k) => /\/\d{8}T\d{6}Z\/manifest\.json$/.test(k));
+  const ids = manifestKeys.map((k) => k.split('/').at(-2)).sort();
+  const keep = new Set(retainedBuilds(ids, manifest.buildId, previous));
+  const marked = new Set();
+  for (const id of keep) {
+    const m = await store.getJson(`${kind.prefix}/${id}/manifest.json`);
+    if (!m) throw new Error(`retained manifest ${id} could not be read; nothing deleted`);
+    for (const o of kind.objects(m)) marked.add(o.key);
+  }
+  const sweep = (await store.list(`${kind.prefix}/objects/`)).map((o) => o.key).filter((k) => !marked.has(k));
+  const oldManifests = ids.filter((id) => !keep.has(id)).map((id) => `${kind.prefix}/${id}/manifest.json`);
+  if (sweep.length || oldManifests.length) {
+    await holding();
+    await store.remove([...oldManifests, ...sweep]);
+  }
+  console.log(`clean-up: kept ${keep.size} manifests, deleted ${oldManifests.length} manifests and ${sweep.length} objects`);
 }
 
 async function publishFuel(store, holding) {
