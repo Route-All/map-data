@@ -37,7 +37,9 @@ async function main(work) {
   if (!fs.existsSync(zip)) execFileSync('curl', ['-fsSL', '--retry', '5', '-A', 'RouteAll boundaries build', '-o', zip, URL_], { stdio: 'inherit' });
   execFileSync('unzip', ['-o', '-q', zip, '-d', src]);
   const shp = fs.readdirSync(src).find((f) => f.endsWith('.shp'));
-  const lastModified = execFileSync('curl', ['-fsSI', URL_]).toString().match(/last-modified: (.+)/i)?.[1]?.trim() ?? null;
+  // Best effort: a Census hiccup on this HEAD must not fail the build; the date is informational.
+  let lastModified = null;
+  try { lastModified = execFileSync('curl', ['-fsSI', '-A', 'RouteAll boundaries build', URL_]).toString().match(/last-modified: (.+)/i)?.[1]?.trim() ?? null; } catch {}
   const started = Date.now();
   const { index, blocks } = buildGrid(await readStates(path.join(src, shp)));
   const put = (value) => {

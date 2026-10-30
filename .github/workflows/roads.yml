@@ -77,18 +77,28 @@ jobs:
         if: steps.source.outputs.newer == 'true'
         run: ./build.sh
 
-      # The state-boundary grid (format/stateBoundary.mjs) from Census TIGER/Line; unchanged blocks keep their hash.
-      - name: Build state boundaries
-        if: steps.source.outputs.newer == 'true'
-        run: node boundaries.mjs .build
-
-      - name: Publish roads (v1, v2), boundaries, then places
+      # v1 roads and places go live first: a v2 or boundary failure below must never hold back the
+      # daily road update the app reads today.
+      - name: Publish roads (v1), then places
         if: steps.source.outputs.newer == 'true'
         env:
           R2_S3_ENDPOINT: ${{ secrets.R2_S3_ENDPOINT }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: node publish.mjs && KIND=roads2 node publish.mjs && KIND=boundaries node publish.mjs && KIND=pois node publish.mjs
+        run: node publish.mjs && KIND=pois node publish.mjs
+
+      # The state-boundary grid (format/stateBoundary.mjs) from Census TIGER/Line; unchanged blocks keep their hash.
+      - name: Build state boundaries
+        if: steps.source.outputs.newer == 'true'
+        run: node boundaries.mjs .build
+
+      - name: Publish roads (v2), then boundaries
+        if: steps.source.outputs.newer == 'true'
+        env:
+          R2_S3_ENDPOINT: ${{ secrets.R2_S3_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: KIND=roads2 node publish.mjs && KIND=boundaries node publish.mjs
 
       # Proves THIS run went live, not just that some pointer exists. The query string skips the
       # edge cache. Reads only the public domain.

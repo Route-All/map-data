@@ -53,9 +53,12 @@ const BOUNDARIES = {
   objects: (m) => [m.index, ...Object.values(m.blocks)], local: (o) => o.key.split('/').pop(),
 };
 export const stampOf = (id) => Date.parse(id.replace(/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z$/, '$1-$2-$3T$4:$5:$6Z'));
-/** Manifests to keep: built within RETAIN_DAYS, or current, or previous. */
+/** Manifests to keep: current, previous, the newest, or replaced less than RETAIN_DAYS ago. */
 export function retainedBuilds(ids, current, previous, now = Date.now()) {
-  return ids.filter((id) => id === current || id === previous || now - stampOf(id) <= RETAIN_DAYS * DAY);
+  // A phone can hold a manifest it read while it was current, so the clock starts when the next build replaced it.
+  const sorted = [...ids].sort((a, b) => stampOf(a) - stampOf(b));
+  return sorted.filter((id, i) => id === current || id === previous || !sorted[i + 1]
+    || now - stampOf(sorted[i + 1]) <= RETAIN_DAYS * DAY);
 }
 
 

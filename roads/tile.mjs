@@ -150,7 +150,10 @@ function finish(work) {
   const build = { buildId: builtAt.replace(/[-:]/g, ''), builtAt, tileCount, sourceDates };
   fs.writeFileSync(path.join(work, 'build.json'), JSON.stringify(build, null, 1) + '\n');
   console.log(`${tileCount} tiles, ${(bytes / 1e6).toFixed(1)} MB`);
-  const v2 = packTilesV2(work);
+  // A v2 failure must not cost the v1 build above: without manifest2.json the roads2 publish fails on its own, after
+  // v1 is live (roads.yml publishes v1 first).
+  let v2;
+  try { v2 = packTilesV2(work); } catch (error) { console.error(`::error::v2 tiles not built: ${error.message}`); return; }
   const manifest = {
     schema: 2, buildId: build.buildId, builtAt, grid: { perDegree: PER_DEGREE },
     // Coverage is the states built; a tile key absent from `tiles` is empty only inside them.
