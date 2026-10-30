@@ -2,7 +2,7 @@
 #
 # Asks Geofabrik first (roads/source-check.mjs) and builds only when a state has a newer extract
 # than the live build, so a new extract goes live within a day. Then cuts every US state + DC into
-# road tiles and place tiles and publishes them through R2's S3 API (roads/publish.mjs): tiles
+# road tiles (v1 and v2), the state-boundary grid and place tiles and publishes them through R2's S3 API (roads/publish.mjs): tiles
 # first, then build.json, then <kind>/current.json last, inside a one-writer lock. Any failed step
 # stops the job before the pointer moves, and GitHub emails the failure.
 #
@@ -57,11 +57,11 @@ jobs:
 
       - name: Install
         if: steps.source.outputs.newer == 'true'
-        run: npm ci --omit=dev
+        run: npm ci --omit=dev && (cd ../format && npm ci --omit=dev)
 
       - name: Tests
         if: steps.source.outputs.newer == 'true'
-        run: npm test
+        run: npm test && (cd ../format && npm test)
 
       # The largest downloads (California, Texas) and their working copies need more than the
       # ~14 GB a runner starts with; these preinstalled toolchains are never used here.
@@ -77,13 +77,18 @@ jobs:
         if: steps.source.outputs.newer == 'true'
         run: ./build.sh
 
-      - name: Publish roads, then places
+      # The state-boundary grid (format/stateBoundary.mjs) from Census TIGER/Line; unchanged blocks keep their hash.
+      - name: Build state boundaries
+        if: steps.source.outputs.newer == 'true'
+        run: node boundaries.mjs .build
+
+      - name: Publish roads (v1, v2), boundaries, then places
         if: steps.source.outputs.newer == 'true'
         env:
           R2_S3_ENDPOINT: ${{ secrets.R2_S3_ENDPOINT }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: node publish.mjs && KIND=pois node publish.mjs
+        run: node publish.mjs && KIND=roads2 node publish.mjs && KIND=boundaries node publish.mjs && KIND=pois node publish.mjs
 
       # Proves THIS run went live, not just that some pointer exists. The query string skips the
       # edge cache. Reads only the public domain.
@@ -96,4 +101,11 @@ jobs:
             live=$(curl -fsS "https://tiles.routeall.app/$kind/current.json?run=$GITHUB_RUN_ID" | node -p "JSON.parse(require('fs').readFileSync(0)).buildId")
             echo "$kind: built $want, live $live"
             [ "$want" = "$live" ] || { echo "::error::$kind/current.json still points at $live"; exit 1; }
+          done
+          for pair in roads/v2:.build/manifest2.json boundaries/v1:.build/boundaries/manifest.json; do
+            prefix=${pair%%:*}; file=${pair#*:}
+            want=$(node -p "require('./$file').buildId")
+            live=$(curl -fsS "https://tiles.routeall.app/$prefix/current.json?run=$GITHUB_RUN_ID" | node -p "JSON.parse(require('fs').readFileSync(0)).buildId")
+            echo "$prefix: built $want, live $live"
+            [ "$want" = "$live" ] || { echo "::error::$prefix/current.json still points at $live"; exit 1; }
           done
