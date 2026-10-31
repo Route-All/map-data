@@ -67,3 +67,8 @@ test('tile keys and box cover match the v1 grid', () => {
   assert.equal(tileKey(30.26, -97.74), '121_-391');
   assert.deepEqual(tilesForBox(-97.76, 30.24, -97.74, 30.26), ['120_-392', '120_-391', '121_-392', '121_-391']);
 });
+
+test('a box across 180° is split there, never empty (review finding 5)', () => {
+  assert.deepEqual(tilesForBox(179.9, 51.9, -179.9, 51.99), ['207_719', '207_-720']);
+  assert.deepEqual(tilesForBox(-180.1, 51.9, -179.9, 51.99), ['207_719', '207_-720']); // a side past -180
+});

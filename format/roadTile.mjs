@@ -36,8 +36,11 @@ export const TAGS = ['highway', 'oneway', 'junction', 'service', 'layer', 'bridg
 
 export const tileKey = (lat, lon) => `${Math.floor(lat * PER_DEGREE)}_${Math.floor(lon * PER_DEGREE)}`;
 
-/** Every tile key a box touches, as `row_col`. */
+const wrapLon = (x) => ((((x + 180) % 360) + 360) % 360) - 180;
+/** Every tile key a box touches, as `row_col`. A box across 180° (west > east, or a side past ±180) is split there. */
 export function tilesForBox(west, south, east, north) {
+  if (west < -180 || east >= 180) { west = wrapLon(west); east = wrapLon(east); }
+  if (west > east) return [...tilesForBox(west, south, 180 - 1e-9, north), ...tilesForBox(-180, south, east, north)];
   const keys = [];
   for (let r = Math.floor(south * PER_DEGREE); r <= Math.floor(north * PER_DEGREE); r++)
     for (let c = Math.floor(west * PER_DEGREE); c <= Math.floor(east * PER_DEGREE); c++) keys.push(`${r}_${c}`);
