@@ -2,7 +2,7 @@
 #
 # Asks Geofabrik first (roads/source-check.mjs) and builds only when a state has a newer extract
 # than the live build, so a new extract goes live within a day. Then cuts every US state + DC into
-# road tiles (v1 and v2), the state-boundary grid and place tiles and publishes them through R2's S3 API (roads/publish.mjs): tiles
+# road tiles (v1, and v2: road tile v3 in 2° packs read by byte range), the state-boundary grid and place tiles and publishes them through R2's S3 API (roads/publish.mjs): tiles
 # first, then build.json, then <kind>/current.json last, inside a one-writer lock. Any failed step
 # stops the job before the pointer moves, and GitHub emails the failure.
 #
@@ -119,3 +119,18 @@ jobs:
             echo "$prefix: built $want, live $live"
             [ "$want" = "$live" ] || { echo "::error::$prefix/current.json still points at $live"; exit 1; }
           done
+          # Road tiles v2: the live manifest is the one the pointer names (SHA-256), and one block manifest and one tile
+          # head read back by byte range match the hashes listed for them.
+          node --input-type=module -e "
+            const get = async (p, init) => { const r = await fetch('https://tiles.routeall.app/' + p, init); if (!r.ok) throw new Error(r.status + ' ' + p); return new Uint8Array(await r.arrayBuffer()); };
+            const hex = async (b) => Buffer.from(await crypto.subtle.digest('SHA-256', b)).toString('hex');
+            const ptr = JSON.parse(Buffer.from(await get('roads/v2/current.json?run=$GITHUB_RUN_ID')));
+            const m = await get(ptr.manifest);
+            if (ptr.schema !== 3 || (await hex(m)) !== ptr.sha256) throw new Error('roads/v2 manifest does not match its pointer');
+            const ref = Object.values(JSON.parse(Buffer.from(m)).blocks)[0], block = await get(ref.key);
+            if ((await hex(block)) !== ref.sha256) throw new Error(ref.key + ' does not match its hash');
+            const [key, t] = Object.entries(JSON.parse(Buffer.from(block)).tiles)[0];
+            const head = await get(t.key, { headers: { range: 'bytes=' + t.offset + '-' + (t.offset + t.head - 1) } });
+            if (head.length !== t.head || (await hex(head)) !== t.headSha256) throw new Error('tile ' + key + ' head read by range does not match');
+            console.log('roads/v2: manifest, block ' + ref.key + ' and the head of tile ' + key + ' read back and match');
+          "

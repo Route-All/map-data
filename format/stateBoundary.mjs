@@ -78,32 +78,66 @@ export function distanceToEdge(p, rings, box) {
  *   | { kind: 'unavailable', reason }
  * `boundary` when the point is within `boundaryMeters` of a line between states, or in no state but within
  * `coastMeters` of one (offshore, across a border river): the caller decides with the permit's own crossing, or asks. `getBlock(blockKey)` resolves to the decoded block, or null.
+ * A line on a cell edge, or just past it in the next cell, counts like one inside the cell: within `boundaryMeters` of
+ * an edge the cells across it are read too.
  */
 export async function stateAt(index, getBlock, point, { boundaryMeters = 30, coastMeters = 2000 } = {}) {
   if (!index || index.schema !== SCHEMA) return { kind: 'unavailable', reason: 'no boundary index' };
   const cell = cellKey(point[0], point[1]), entry = index.cells[cell];
   if (entry === undefined) return { kind: 'outside_us' };
-  if (entry) return { kind: 'inside', state: entry };
-  let block;
-  try { block = await getBlock(blockKey(cell)); } catch (e) { return { kind: 'unavailable', reason: String(e?.message ?? e) }; }
-  const pieces = block?.[cell];
-  if (!pieces) return { kind: 'unavailable', reason: `missing boundary block for ${cell}` };
+  try {
+    const here = await cellAt(index, getBlock, cell);
+    const states = here.pieces ? Object.keys(here.pieces).sort() : [entry];
+    const containing = here.pieces ? states.filter((s) => inRings(point, here.pieces[s])) : [entry];
+    const near = here.pieces ? states.map((s) => ({ s, d: distanceToEdge(point, here.pieces[s], here.box) })).filter((x) => x.d <= boundaryMeters) : [];
+    near.push(...(await across(index, getBlock, point, here.box, containing, boundaryMeters)));
+    if (near.length) {
+      const all = [...new Set([...containing, ...near.map((x) => x.s)])].sort();
+      return { kind: 'boundary', states: all, distanceMeters: Math.min(...near.map((x) => x.d)) };
+    }
+    if (containing.length === 1) return { kind: 'inside', state: containing[0] };
+    if (!containing.length) {
+      // In no state but beside one (water off the coast, a lake shore, the far side of a river border): the source
+      // polygons and other maps disagree here, so it is never a certain "outside the US"; the caller asks again.
+      const coast = states.map((s) => ({ s, d: distanceToEdge(point, here.pieces[s], here.box) })).filter((x) => x.d <= coastMeters);
+      return coast.length ? { kind: 'boundary', states: coast.map((x) => x.s), distanceMeters: Math.min(...coast.map((x) => x.d)) } : { kind: 'outside_us' };
+    }
+    return { kind: 'boundary', states: containing, distanceMeters: 0 }; // overlapping source polygons: never guess
+  } catch (e) { return { kind: 'unavailable', reason: String(e?.message ?? e) }; }
+}
+
+/** A cell's box and, for a cell a line crosses, its pieces; throws when a listed block cannot be read. */
+async function cellAt(index, getBlock, cell) {
   const box = cellBounds(cell);
-  const states = Object.keys(pieces).sort();
-  const containing = states.filter((s) => inRings(point, pieces[s]));
-  const near = states.map((s) => ({ s, d: distanceToEdge(point, pieces[s], box) })).filter((x) => x.d <= boundaryMeters);
-  if (near.length) {
-    const all = [...new Set([...containing, ...near.map((x) => x.s)])].sort();
-    return { kind: 'boundary', states: all, distanceMeters: Math.min(...near.map((x) => x.d)) };
+  if (index.cells[cell] !== 0) return { box, pieces: null };
+  const pieces = (await getBlock(blockKey(cell)))?.[cell];
+  if (!pieces) throw new Error(`missing boundary block for ${cell}`);
+  return { box, pieces };
+}
+
+/**
+ * Lines within `limit` metres of p that lie on its cell's edges or past them, as [{ s, d }]: for each nearby edge
+ * (and corner), the cell across it adds every state whose real line there is within reach, and the state just across
+ * the edge when it is not the one p is in (the line is then between p and the edge).
+ */
+async function across(index, getBlock, p, box, containing, limit) {
+  const m = Math.cos(p[1] * RAD) * RAD * R, ε = 1e-9;
+  const dx = [[(p[0] - box.west) * m, box.west - ε], [(box.east - p[0]) * m, box.east + ε]].filter(([d]) => d <= limit);
+  const dy = [[(p[1] - box.south) * RAD * R, box.south - ε], [(box.north - p[1]) * RAD * R, box.north + ε]].filter(([d]) => d <= limit);
+  const probes = [...dx.map(([d, x]) => [d, [x, p[1]]]), ...dy.map(([d, y]) => [d, [p[0], y]]),
+    ...dx.flatMap(([a, x]) => dy.map(([b, y]) => [Math.hypot(a, b), [x, y]]))].filter(([d]) => d <= limit);
+  const out = [];
+  for (const [d, q] of probes) {
+    const key = cellKey(q[0], q[1]), entry = index.cells[key];
+    if (entry === undefined) continue; // outside the US: the coast rule decides, as inside a cell
+    const there = await cellAt(index, getBlock, key);
+    if (there.pieces) {
+      for (const [s, rings] of Object.entries(there.pieces)) { const e = distanceToEdge(p, rings, there.box); if (e <= limit) out.push({ s, d: e }); }
+      const at = Object.keys(there.pieces).filter((s) => inRings(q, there.pieces[s]));
+      if (at.length === 1 && !containing.includes(at[0])) out.push({ s: at[0], d });
+    } else if (!containing.includes(entry)) out.push({ s: entry, d });
   }
-  if (containing.length === 1) return { kind: 'inside', state: containing[0] };
-  if (!containing.length) {
-    // In no state but beside one (water off the coast, a lake shore, the far side of a river border): the source
-    // polygons and other maps disagree here, so it is never a certain "outside the US"; the caller asks again.
-    const coast = states.map((s) => ({ s, d: distanceToEdge(point, pieces[s], box) })).filter((x) => x.d <= coastMeters);
-    return coast.length ? { kind: 'boundary', states: coast.map((x) => x.s), distanceMeters: Math.min(...coast.map((x) => x.d)) } : { kind: 'outside_us' };
-  }
-  return { kind: 'boundary', states: containing, distanceMeters: 0 }; // overlapping source polygons: never guess
+  return out;
 }
 
 /**

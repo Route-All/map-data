@@ -49,3 +49,19 @@ test('clipRing keeps the part inside the box; gzip JSON round trips', () => {
   assert.deepEqual(clipRing(sq(0, 0, 1, 1), { west: 2, south: 2, east: 3, north: 3 }), []);
   assert.deepEqual(decodeJson(encodeJson(grid.index)), grid.index);
 });
+
+test('a line on a cell edge, or just past it, is a boundary from either side (review finding 3)', async () => {
+  // EE|FF meet exactly on lon 5.0, a cell edge; GG|HH meet at lon 10.2501, 11 m into the next cell.
+  const g = buildGrid([{ code: 'EE', polygons: [[sq(4, 0, 5, 1)]] }, { code: 'FF', polygons: [[sq(5, 0, 6, 1)]] },
+    { code: 'GG', polygons: [[sq(9, 0, 10.2501, 1)]] }, { code: 'HH', polygons: [[sq(10.2501, 0, 11, 1)]] }]);
+  const at = (p) => stateAt(g.index, async (k) => g.blocks[k] ?? null, p);
+  assert.equal(g.index.cells['2_19'], 'EE'); // both cells beside lon 5.0 are whole
+  for (const p of [[4.9999, 0.5], [5.0001, 0.5], [4.9999, 0.0001]]) {
+    const r = await at(p);
+    assert.deepEqual([r.kind, r.states], ['boundary', ['EE', 'FF']], String(p));
+    assert.ok(r.distanceMeters < 15);
+  }
+  assert.deepEqual(await at([4.99, 0.5]), { kind: 'inside', state: 'EE' }); // 1.1 km away
+  assert.deepEqual(await at([10.2499, 0.5]).then((r) => [r.kind, r.states]), ['boundary', ['GG', 'HH']]);
+  assert.deepEqual(await at([10.249, 0.5]), { kind: 'inside', state: 'GG' });
+});

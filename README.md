@@ -15,7 +15,7 @@ driver data, and no credentials.
 | Places (truck stops, fuel, rest areas, weigh stations) | `pois/current.json` → `pois/<buildId>/…` | OpenStreetMap, All The Places (CC0), US DOT NTAD Truck Stop Parking | With the roads |
 | Road work and closures | `events/v2/current.json` → `events/v2/manifests/…` → `events/v2/objects/<sha256>.json` (and the older `events/current.json` + `events/t/…`) | USDOT WZDx feed registry, state WZDx feeds, Caltrans Lane Closure System | Hourly |
 | Fuel prices | `fuel/current.json` | U.S. Energy Information Administration | Weekly |
-| Road tiles v2 (class, one-way, restrictions) | `roads/v2/current.json` → `roads/v2/<buildId>/manifest.json` → `roads/v2/objects/<sha256>.bin` | OpenStreetMap (Geofabrik US state extracts) | With the roads |
+| Road tiles v2 (class, one-way, restrictions) | `roads/v2/current.json` → `roads/v2/<buildId>/manifest.json` (one entry per 2° block) → `roads/v2/blocks/<sha256>.json` (each tile's place, size and SHA-256) → byte ranges of `roads/v2/packs/<sha256>.bin` (road tile v3, `format/roadTile.mjs`). Builds before schema 3 list `roads/v2/objects/<sha256>.bin` directly | OpenStreetMap (Geofabrik US state extracts) | With the roads |
 | State boundaries | `boundaries/v1/current.json` → `boundaries/v1/<buildId>/manifest.json` → `boundaries/v1/objects/<sha256>.json.gz` | U.S. Census Bureau TIGER/Line states | With the roads |
 
 Publication order is always content first, then the version's manifest, then the `current.json`

@@ -37,28 +37,66 @@ const KIND = process.env.KIND ?? 'roads';
 
 /*
   Content-addressed data (road tiles v2, state boundaries; plan 1.5, spec section 5): each object is named by its
-  SHA-256 and never changes, a build is a manifest listing the objects it uses, and <prefix>/current.json points at
-  the live manifest. A new build uploads only objects not already there, then its manifest, then the pointer LAST.
+  SHA-256 and never changes, a build is a manifest listing the objects it uses (for roads v2, through its block
+  manifests), and <prefix>/current.json points at the live manifest. A new build uploads only objects not already there, then its manifest, then the pointer LAST.
   Clean-up is mark-and-sweep in the same lock: keep every manifest built in the last RETAIN_DAYS plus the current and
   previous ones, re-read them all, and delete only objects none of them lists. There is no bucket age rule on these
   objects, because a new manifest can reuse an old one.
 */
 const RETAIN_DAYS = 35;
+// Road tiles v2 manifests: schema 2 listed every tile object; schema 3 (format/roadTile.mjs) lists one block manifest
+// per 2° block, and each block manifest lists its pack objects. `read` gets a listed JSON object (the build's folder
+// while uploading, the store while sweeping). Both schemas stay readable here: a retained schema-2 build keeps its
+// objects until it ages out.
 const ROADS_V2 = {
   prefix: 'roads/v2', manifest: () => path.join(WORK, 'manifest2.json'), dir: () => path.join(WORK, 'tiles2'),
-  objects: (m) => Object.values(m.tiles), local: (o) => o.key.split('/').pop(),
+  folders: ['objects/', 'blocks/', 'packs/'],
+  async objects(m, read) {
+    if (m.schema === 2) return Object.values(m.tiles);
+    const blocks = Object.values(m.blocks);
+    const packs = await pool(blocks, 16, async (b) => {
+      const block = await read(b);
+      if (!block?.packs) throw new Error(`block manifest ${b.key} could not be read`);
+      return block.packs;
+    });
+    return [...blocks, ...packs.flat()];
+  },
+  // A schema-2 build folder holds its tiles flat; a schema-3 one has blocks/ and packs/.
+  local: (o) => (o.key.startsWith('roads/v2/objects/') ? o.key.split('/').pop() : o.key.slice('roads/v2/'.length)),
 };
 const BOUNDARIES = {
   prefix: 'boundaries/v1', manifest: () => path.join(WORK, 'boundaries', 'manifest.json'), dir: () => path.join(WORK, 'boundaries', 'objects'),
-  objects: (m) => [m.index, ...Object.values(m.blocks)], local: (o) => o.key.split('/').pop(),
+  folders: ['objects/'],
+  objects: async (m) => [m.index, ...Object.values(m.blocks)], local: (o) => o.key.split('/').pop(),
 };
+/** Runs fn over items, at most n at a time; results in order. */
+async function pool(items, n, fn) {
+  const { pool: run } = await import('./store.mjs');
+  const out = new Array(items.length);
+  await run(items, n, async (x, i) => { out[i] = await fn(x, i); });
+  return out;
+}
 export const stampOf = (id) => Date.parse(id.replace(/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z$/, '$1-$2-$3T$4:$5:$6Z'));
-/** Manifests to keep: current, previous, the newest, or replaced less than RETAIN_DAYS ago. */
-export function retainedBuilds(ids, current, previous, now = Date.now()) {
-  // A phone can hold a manifest it read while it was current, so the clock starts when the next build replaced it.
-  const sorted = [...ids].sort((a, b) => stampOf(a) - stampOf(b));
-  return sorted.filter((id, i) => id === current || id === previous || !sorted[i + 1]
-    || now - stampOf(sorted[i + 1]) <= RETAIN_DAYS * DAY);
+/** The publishing clock; PUBLISH_NOW_MS lets the tests publish "40 days ago". */
+const nowMs = () => Number(process.env.PUBLISH_NOW_MS) || Date.now();
+/**
+ * Manifests to keep: current, previous, or replaced less than RETAIN_DAYS ago. A phone can hold a manifest it read
+ * while it was current, so the clock starts when the next build actually REPLACED it, read from the publication
+ * ledger (<prefix>/published.json, written under the lock right after the pointer moves). Folder timestamps were not
+ * enough: a manifest whose publish failed before the pointer moved never replaced anything, yet counted as the
+ * replacement and cut the live build's 35 days short (Codex review 2026-10-31, #10). A build the ledger does not know
+ * (published before it existed, or never published) is kept until the ledger is RETAIN_DAYS old.
+ */
+export function retainedBuilds(ids, current, previous, now = Date.now(), history = []) {
+  const at = new Map(history.map((h, i) => [h.buildId, i]));
+  const started = history.map((h) => h.at).filter(Boolean).map(Date.parse).sort((a, b) => a - b)[0];
+  const recent = (iso) => iso == null || now - Date.parse(iso) <= RETAIN_DAYS * DAY;
+  return ids.filter((id) => {
+    if (id === current || id === previous) return true;
+    if (!at.has(id)) return started == null || now - started <= RETAIN_DAYS * DAY;
+    const next = history[at.get(id) + 1];
+    return !next || recent(next.at);
+  });
 }
 
 
@@ -73,13 +111,13 @@ if (process.env.R2_ACCESS_KEY_ID || process.env.STORE_DIR) {
 }
 
 async function publishAddressed(store, holding, kind) {
-  const { pool } = await import('./store.mjs');
   const crypto = await import('node:crypto');
   const manifestText = fs.readFileSync(kind.manifest(), 'utf8'), manifest = JSON.parse(manifestText);
-  const objects = kind.objects(manifest);
+  const objects = await kind.objects(manifest, async (o) => JSON.parse(fs.readFileSync(path.join(kind.dir(), kind.local(o)), 'utf8')));
   const live = await store.getJson(`${kind.prefix}/current.json`);
   if (live && live.buildId > manifest.buildId && !ROLLBACK) throw new Error(`live ${kind.prefix} build ${live.buildId} is newer than ${manifest.buildId}; ROLLBACK=1 to go back`);
-  const have = new Set((await store.list(`${kind.prefix}/objects/`)).map((o) => o.key));
+  const listAll = async () => (await Promise.all(kind.folders.map((f) => store.list(`${kind.prefix}/${f}`)))).flat();
+  const have = new Set((await listAll()).map((o) => o.key));
   const missing = objects.filter((o) => !have.has(o.key));
   console.log(`${kind.prefix} ${manifest.buildId}: ${objects.length} objects, ${missing.length} to upload; live ${live?.buildId ?? 'none'}`);
   const t0 = Date.now();
@@ -87,27 +125,38 @@ async function publishAddressed(store, holding, kind) {
     const bytes = fs.readFileSync(path.join(kind.dir(), kind.local(o)));
     // The name is the promise: an object whose bytes do not hash to it never goes up.
     if (bytes.length !== o.bytes || crypto.createHash('sha256').update(bytes).digest('hex') !== o.sha256) throw new Error(`${o.key} does not match its manifest entry`);
-    await store.put(o.key, bytes, { type: 'application/octet-stream', cache: TILE_CACHE });
+    await store.put(o.key, bytes, { type: o.key.endsWith('.json') ? 'application/json' : 'application/octet-stream', cache: TILE_CACHE });
   });
   console.log(`objects in place in ${Math.round((Date.now() - t0) / 1000)} s`);
+  // Objects first, then the manifest, then the pointer LAST.
   const manifestKey = `${kind.prefix}/${manifest.buildId}/manifest.json`;
   await store.put(manifestKey, manifestText, { type: 'application/json', cache: TILE_CACHE });
   const previous = live?.buildId === manifest.buildId ? live.previous : live?.buildId;
   await holding();
-  await store.put(`${kind.prefix}/current.json`, JSON.stringify({ buildId: manifest.buildId, manifest: manifestKey, ...(previous && { previous }) }), { type: 'application/json', cache: POINTER_CACHE });
+  // The pointer names the manifest's schema, SHA-256 and size, so a reader can check it and keep it on disk.
+  await store.put(`${kind.prefix}/current.json`, JSON.stringify({ buildId: manifest.buildId, manifest: manifestKey, schema: manifest.schema,
+    sha256: crypto.createHash('sha256').update(manifestText).digest('hex'), bytes: Buffer.byteLength(manifestText), ...(previous && { previous }) }),
+  { type: 'application/json', cache: POINTER_CACHE });
   console.log(`live: ${kind.prefix} ${manifest.buildId}`);
+  // The publication ledger: when each build became current, so retention counts from its actual replacement.
+  const ledgerKey = `${kind.prefix}/published.json`;
+  const ledger = (await store.getJson(ledgerKey))?.builds ?? (live && live.buildId !== manifest.buildId ? [{ buildId: live.buildId, at: null }] : []);
+  if (ledger.at(-1)?.buildId !== manifest.buildId) ledger.push({ buildId: manifest.buildId, at: new Date(nowMs()).toISOString() });
+  await store.put(ledgerKey, JSON.stringify({ schema: 1, builds: ledger }), { type: 'application/json', cache: POINTER_CACHE });
 
-  // Mark and sweep, still holding the lock.
+  // Mark and sweep, still holding the lock: block manifests and packs (schema 3) are marked like tiles (schema 2).
   const manifestKeys = (await store.list(`${kind.prefix}/`)).map((o) => o.key).filter((k) => /\/\d{8}T\d{6}Z\/manifest\.json$/.test(k));
   const ids = manifestKeys.map((k) => k.split('/').at(-2)).sort();
-  const keep = new Set(retainedBuilds(ids, manifest.buildId, previous));
+  const keep = new Set(retainedBuilds(ids, manifest.buildId, previous, nowMs(), ledger));
   const marked = new Set();
+  const blockCache = new Map(); // a block manifest shared by several retained builds is read once
+  const fromStore = (o) => { if (!blockCache.has(o.key)) blockCache.set(o.key, store.getJson(o.key)); return blockCache.get(o.key); };
   for (const id of keep) {
     const m = await store.getJson(`${kind.prefix}/${id}/manifest.json`);
     if (!m) throw new Error(`retained manifest ${id} could not be read; nothing deleted`);
-    for (const o of kind.objects(m)) marked.add(o.key);
+    for (const o of await kind.objects(m, fromStore)) marked.add(o.key);
   }
-  const sweep = (await store.list(`${kind.prefix}/objects/`)).map((o) => o.key).filter((k) => !marked.has(k));
+  const sweep = (await listAll()).map((o) => o.key).filter((k) => !marked.has(k));
   const oldManifests = ids.filter((id) => !keep.has(id)).map((id) => `${kind.prefix}/${id}/manifest.json`);
   if (sweep.length || oldManifests.length) {
     await holding();

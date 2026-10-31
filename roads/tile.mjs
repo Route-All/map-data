@@ -9,7 +9,7 @@ import readline from 'node:readline';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { MAX_TILE_BYTES, PER_DEGREE } from './query.mjs';
-import { encodeTile, TAGS } from '../format/roadTile.mjs';
+import { encodeTile3, headLength, blockOf, SCHEMA, TAGS } from '../format/roadTile.mjs';
 
 // Ways Overpass would also return but a truck can never drive. The app's name match would
 // otherwise happily snap a route onto a footpath that shares a street's name.
@@ -109,27 +109,57 @@ export function packTile(lines) {
   return Buffer.concat([head, refs, names, ...members]);
 }
 
-// v2: each tile stored once under its SHA-256 and listed in the build's manifest with its size, so a listed tile
-// that is missing is an error, never "no roads here" (plan 1.1, spec section 4).
-function packTilesV2(work) {
+// v2 (schema 3, plan 1.1 and spec section 4). Each tile is encoded as road tile v3 (format/roadTile.mjs: read by byte
+// ranges), and the tiles of one 2° block are packed back to back into pack objects of at most PACK_MAX_BYTES, each
+// stored once under its SHA-256. A block manifest, also stored under its SHA-256, lists every tile of the block:
+// its pack, offset, length and SHA-256, and its head's length and SHA-256 (the first range a reader fetches).
+// The build's manifest (manifest2.json) maps each block to its block manifest. A listed tile that is missing is an
+// error, never "no roads here".
+const PACK_MAX_BYTES = 48 * 1024 * 1024;
+const sha256 = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
+export function packTilesV2(work) {
   const raw2 = path.join(work, 'raw2'), out = path.join(work, 'tiles2');
-  fs.mkdirSync(out, { recursive: true });
-  const tiles = {};
-  let bytes = 0;
+  fs.mkdirSync(path.join(out, 'packs'), { recursive: true });
+  fs.mkdirSync(path.join(out, 'blocks'), { recursive: true });
+  const byBlock = new Map();
   for (const key of fs.readdirSync(raw2).sort()) {
-    const ways = fs.readFileSync(path.join(raw2, key), 'utf8').split('\n').filter(Boolean).map((line) => {
-      const [id, ref, name, flat, tags] = line.split('\t');
-      return { id, ref, name, coords: flat.split(',').map(Number), tags: JSON.parse(tags) };
-    });
-    const tile = encodeTile(ways);
-    if (tile.length > V2_MAX_TILE_BYTES) throw new Error(`v2 tile ${key} is ${tile.length} bytes, over ${V2_MAX_TILE_BYTES}`);
-    const sha256 = crypto.createHash('sha256').update(tile).digest('hex');
-    fs.writeFileSync(path.join(out, `${sha256}.bin`), tile);
-    tiles[key] = { key: `roads/v2/objects/${sha256}.bin`, sha256, bytes: tile.length };
-    fs.rmSync(path.join(raw2, key));
-    bytes += tile.length;
+    const b = blockOf(key);
+    if (!byBlock.has(b)) byBlock.set(b, []);
+    byBlock.get(b).push(key);
   }
-  return { tiles, bytes };
+  const blocks = {};
+  let bytes = 0, tileCount = 0;
+  for (const [block, keys] of [...byBlock].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    const tiles = {}, packs = [];
+    let pending = [], pendingBytes = 0, pendingKeys = [];
+    const flush = () => {
+      if (!pending.length) return;
+      const pack = Buffer.concat(pending), hash = sha256(pack), packKey = `roads/v2/packs/${hash}.bin`;
+      fs.writeFileSync(path.join(out, 'packs', `${hash}.bin`), pack);
+      packs.push({ key: packKey, sha256: hash, bytes: pack.length });
+      for (const k of pendingKeys) tiles[k].key = packKey;
+      pending = []; pendingBytes = 0; pendingKeys = [];
+    };
+    for (const key of keys) {
+      const ways = fs.readFileSync(path.join(raw2, key), 'utf8').split('\n').filter(Boolean).map((line) => {
+        const [id, ref, name, flat, tags] = line.split('\t');
+        return { id, ref, name, coords: flat.split(',').map(Number), tags: JSON.parse(tags) };
+      });
+      const tile = encodeTile3(ways, key);
+      if (tile.length > V2_MAX_TILE_BYTES) throw new Error(`v2 tile ${key} is ${tile.length} bytes, over ${V2_MAX_TILE_BYTES}`);
+      if (pendingBytes + tile.length > PACK_MAX_BYTES) flush();
+      const head = headLength(tile);
+      tiles[key] = { key: null, offset: pendingBytes, bytes: tile.length, sha256: sha256(tile), head, headSha256: sha256(tile.subarray(0, head)) };
+      pending.push(tile); pendingKeys.push(key); pendingBytes += tile.length;
+      fs.rmSync(path.join(raw2, key));
+      bytes += tile.length; tileCount++;
+    }
+    flush();
+    const text = JSON.stringify({ schema: SCHEMA, block, packs, tiles }), hash = sha256(text);
+    fs.writeFileSync(path.join(out, 'blocks', `${hash}.json`), text);
+    blocks[block] = { key: `roads/v2/blocks/${hash}.json`, sha256: hash, bytes: Buffer.byteLength(text) };
+  }
+  return { blocks, bytes, tileCount };
 }
 
 function finish(work) {
@@ -155,13 +185,14 @@ function finish(work) {
   let v2;
   try { v2 = packTilesV2(work); } catch (error) { console.error(`::error::v2 tiles not built: ${error.message}`); return; }
   const manifest = {
-    schema: 2, buildId: build.buildId, builtAt, grid: { perDegree: PER_DEGREE },
-    // Coverage is the states built; a tile key absent from `tiles` is empty only inside them.
+    schema: SCHEMA, buildId: build.buildId, builtAt, grid: { perDegree: PER_DEGREE, blockDegrees: 2 },
+    // Coverage is the states built; a tile key absent from its block manifest (or a block absent here) is empty only
+    // inside them.
     coverage: { states: Object.keys(sourceDates).sort(), complete: true },
-    sourceDates, tiles: v2.tiles,
+    sourceDates, tileCount: v2.tileCount, blocks: v2.blocks,
   };
   fs.writeFileSync(path.join(work, 'manifest2.json'), JSON.stringify(manifest) + '\n');
-  console.log(`v2: ${Object.keys(v2.tiles).length} tiles, ${(v2.bytes / 1e6).toFixed(1)} MB`);
+  console.log(`v2: ${v2.tileCount} tiles in ${Object.keys(v2.blocks).length} blocks, ${(v2.bytes / 1e6).toFixed(1)} MB`);
 }
 
 const [cmd, work] = process.argv.slice(2);
