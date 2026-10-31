@@ -77,12 +77,26 @@ async function pool(items, n, fn) {
   return out;
 }
 export const stampOf = (id) => Date.parse(id.replace(/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z$/, '$1-$2-$3T$4:$5:$6Z'));
-/** Manifests to keep: current, previous, the newest, or replaced less than RETAIN_DAYS ago. */
-export function retainedBuilds(ids, current, previous, now = Date.now()) {
-  // A phone can hold a manifest it read while it was current, so the clock starts when the next build replaced it.
-  const sorted = [...ids].sort((a, b) => stampOf(a) - stampOf(b));
-  return sorted.filter((id, i) => id === current || id === previous || !sorted[i + 1]
-    || now - stampOf(sorted[i + 1]) <= RETAIN_DAYS * DAY);
+/** The publishing clock; PUBLISH_NOW_MS lets the tests publish "40 days ago". */
+const nowMs = () => Number(process.env.PUBLISH_NOW_MS) || Date.now();
+/**
+ * Manifests to keep: current, previous, or replaced less than RETAIN_DAYS ago. A phone can hold a manifest it read
+ * while it was current, so the clock starts when the next build actually REPLACED it, read from the publication
+ * ledger (<prefix>/published.json, written under the lock right after the pointer moves). Folder timestamps were not
+ * enough: a manifest whose publish failed before the pointer moved never replaced anything, yet counted as the
+ * replacement and cut the live build's 35 days short (Codex review 2026-10-31, #10). A build the ledger does not know
+ * (published before it existed, or never published) is kept until the ledger is RETAIN_DAYS old.
+ */
+export function retainedBuilds(ids, current, previous, now = Date.now(), history = []) {
+  const at = new Map(history.map((h, i) => [h.buildId, i]));
+  const started = history.map((h) => h.at).filter(Boolean).map(Date.parse).sort((a, b) => a - b)[0];
+  const recent = (iso) => iso == null || now - Date.parse(iso) <= RETAIN_DAYS * DAY;
+  return ids.filter((id) => {
+    if (id === current || id === previous) return true;
+    if (!at.has(id)) return started == null || now - started <= RETAIN_DAYS * DAY;
+    const next = history[at.get(id) + 1];
+    return !next || recent(next.at);
+  });
 }
 
 
@@ -124,11 +138,16 @@ async function publishAddressed(store, holding, kind) {
     sha256: crypto.createHash('sha256').update(manifestText).digest('hex'), bytes: Buffer.byteLength(manifestText), ...(previous && { previous }) }),
   { type: 'application/json', cache: POINTER_CACHE });
   console.log(`live: ${kind.prefix} ${manifest.buildId}`);
+  // The publication ledger: when each build became current, so retention counts from its actual replacement.
+  const ledgerKey = `${kind.prefix}/published.json`;
+  const ledger = (await store.getJson(ledgerKey))?.builds ?? (live && live.buildId !== manifest.buildId ? [{ buildId: live.buildId, at: null }] : []);
+  if (ledger.at(-1)?.buildId !== manifest.buildId) ledger.push({ buildId: manifest.buildId, at: new Date(nowMs()).toISOString() });
+  await store.put(ledgerKey, JSON.stringify({ schema: 1, builds: ledger }), { type: 'application/json', cache: POINTER_CACHE });
 
   // Mark and sweep, still holding the lock: block manifests and packs (schema 3) are marked like tiles (schema 2).
   const manifestKeys = (await store.list(`${kind.prefix}/`)).map((o) => o.key).filter((k) => /\/\d{8}T\d{6}Z\/manifest\.json$/.test(k));
   const ids = manifestKeys.map((k) => k.split('/').at(-2)).sort();
-  const keep = new Set(retainedBuilds(ids, manifest.buildId, previous));
+  const keep = new Set(retainedBuilds(ids, manifest.buildId, previous, nowMs(), ledger));
   const marked = new Set();
   const blockCache = new Map(); // a block manifest shared by several retained builds is read once
   const fromStore = (o) => { if (!blockCache.has(o.key)) blockCache.set(o.key, store.getJson(o.key)); return blockCache.get(o.key); };
