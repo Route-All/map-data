@@ -9,6 +9,12 @@
 #   R2_S3_ENDPOINT
 #   R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY   R2 token: Object Read & Write, public tiles bucket only
 #   WZDX_KEYS (optional)   JSON of registry feed name → API key, for the feeds that need one
+#
+# Hourly in practice: GitHub ran the ':17' schedule only every 4-6.5 h (2026-10-30/31), so road work
+# went 6 h stale. Each run now waits for the next :17 and queues the next run itself with its own
+# GITHUB_TOKEN (workflow_dispatch is one of the events that token may start). The schedule stays as
+# the backstop that restarts the chain, and a run queues the next only when no other run is waiting,
+# so there is never more than one chain. Public repo: the waiting minutes cost nothing.
 
 name: Road Work
 
@@ -28,7 +34,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    timeout-minutes: 20
+      actions: write # queue the next hour's run
+    timeout-minutes: 80
     defaults:
       run:
         working-directory: roads
@@ -53,3 +60,17 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           WZDX_KEYS: ${{ secrets.WZDX_KEYS }}
         run: node events.mjs
+      - name: Queue the next hour
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEXT_IN: ${{ inputs.next_in }}
+        run: |
+          now=$(date -u +%s)
+          wait=${NEXT_IN:-$(( ( (now - 17 * 60) / 3600 + 1) * 3600 + 17 * 60 - now ))}
+          echo "Next run queued in ${wait}s"
+          sleep "$wait"
+          others=$(gh run list -R "$GITHUB_REPOSITORY" --workflow road-work.yml -L 20 --json databaseId,status \
+            -q "[.[] | select(.databaseId != ${GITHUB_RUN_ID} and (.status == \"queued\" or .status == \"pending\" or .status == \"waiting\" or .status == \"requested\" or .status == \"in_progress\"))] | length")
+          if [ "$others" = 0 ]; then gh workflow run road-work.yml -R "$GITHUB_REPOSITORY" --ref main; echo "Queued the next run"
+          else echo "Another run is already waiting; it carries the chain"; fi
