@@ -249,7 +249,7 @@ export function waysNear(tiles, point, radiusMeters) {
 export const MAGIC3 = 'RAT3';
 export const VERSION3 = 3;
 export const HEADER3_BYTES = 24;
-export const CHUNK_TEXT = 96 * 1024;
+export const CHUNK_TEXT = 32 * 1024; // ~8 KB compressed: a phone decodes little more than the query box (measured 10-30: 96 KB read 13% more)
 const MAX_DEPTH = 5;
 const sha256Hex = (bytes) => bytesToHex(sha256(bytes));
 
