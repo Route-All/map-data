@@ -3,7 +3,8 @@
 //   node signals.mjs add <work>  < signals.geojsonseq   one Geofabrik state at a time; appends to <work>/signals-raw.csv
 //   node signals.mjs finish <work>                      merges, writes <work>/signals/<row>_<col>.json + signals.json
 // Source: OSM nodes tagged highway=traffic_signals. Pedestrian-only signals are highway=crossing +
-// crossing=traffic_signals and never pass build.sh's filter.
+// crossing=traffic_signals and never pass build.sh's filter; a signal node that says it serves only a crossing
+// (traffic_signals=pedestrian_crossing, cyclist_crossing, crossing) is dropped here.
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -16,6 +17,8 @@ export const DEG = 0.25; // the tile size the pointer names; the app keys tiles 
 export const MERGE_M = 30;
 
 const r5 = (x) => Math.round(x * 1e5) / 1e5;
+const CROSSING_ONLY = /^(pedestrian_crossing|cyclist_crossing|crossing)$/;
+export const isVehicleSignal = (p) => p?.highway === 'traffic_signals' && !CROSSING_ONLY.test(p.traffic_signals ?? '');
 export const signalKey = (lon, lat) => `${Math.floor(lat / DEG)}_${Math.floor(lon / DEG)}`;
 
 /** OSM signal nodes ([lon, lat][]) → one [lon, lat] per light: nodes within `within` m of each other, their mean. */
@@ -60,7 +63,7 @@ async function add(work) {
   for await (const text of readline.createInterface({ input: process.stdin, crlfDelay: Infinity })) {
     if (!text.trim()) continue;
     const f = JSON.parse(text.replace(/^\x1e/, ''));
-    if (f.geometry?.type !== 'Point') continue;
+    if (f.geometry?.type !== 'Point' || !isVehicleSignal(f.properties)) continue;
     out.push(`${f.properties?.['@id'] ?? ''},${f.geometry.coordinates[0]},${f.geometry.coordinates[1]}\n`);
   }
   fs.appendFileSync(path.join(work, 'signals-raw.csv'), out.join(''));

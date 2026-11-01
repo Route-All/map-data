@@ -20,8 +20,8 @@ mkdir -p "$WORK/pbf"
 # (roundabouts) as lines.
 echo '{"attributes":{"id":true},"linear_tags":true,"area_tags":false,"include_tags":["highway","ref","name","oneway","junction","service","layer","bridge","tunnel","access","hgv","maxheight","maxwidth","maxweight"]}' > "$WORK/export.json"
 echo '{"attributes":{"id":true},"linear_tags":true,"area_tags":false,"include_tags":["highway","ref","destination","destination:lanes","destination:street","exit_to"]}' > "$WORK/signs.json"
-# Traffic signals (signals.mjs): the node and its id only.
-echo '{"attributes":{"id":true},"linear_tags":false,"area_tags":false,"include_tags":["highway"]}' > "$WORK/signal-tags.json"
+# Traffic signals (signals.mjs): the node, its id and what kind of signal it is.
+echo '{"attributes":{"id":true},"linear_tags":false,"area_tags":false,"include_tags":["highway","traffic_signals"]}' > "$WORK/signal-tags.json"
 # Places (pois.mjs): the tags that say what a place is and what it offers a truck.
 echo '{"attributes":{"id":true},"linear_tags":false,"area_tags":true,"include_tags":["amenity","highway","name","brand","hgv","fuel","fuel:diesel","fuel:HGV_diesel","shower","showers","food","restaurant","opening_hours","phone","contact:phone","capacity:hgv","truck_wash","addr:housenumber","addr:street","addr:city"]}' > "$WORK/places.json"
 
@@ -54,7 +54,8 @@ for state in $STATES; do
   osmium export "$WORK/signed.pbf" -c "$WORK/signs.json" -f geojsonseq -x print_record_separator=false \
     --geometry-types=linestring -o - | node pois.mjs signs "$WORK" "$state"
   rm -f "$WORK/signed.pbf"
-  # Traffic lights for "at the second light" (signals.mjs). highway=crossing pedestrian signals are not matched.
+  # Traffic lights for "at the second light" (signals.mjs). highway=crossing pedestrian signals are not matched;
+  # signals.mjs drops the crossing-only ones.
   osmium tags-filter "$pbf" n/highway=traffic_signals -o "$WORK/signals.pbf" --overwrite
   osmium export "$WORK/signals.pbf" -c "$WORK/signal-tags.json" -f geojsonseq -x print_record_separator=false \
     --geometry-types=point -o - | node signals.mjs add "$WORK"

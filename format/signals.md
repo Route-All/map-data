@@ -32,7 +32,9 @@ Additive: it never changes `roads/`, `pois/`, `boundaries/` or `events/`.
 ## What counts as a light
 
 - OpenStreetMap nodes tagged `highway=traffic_signals`, from the Geofabrik state extracts. Pedestrian-only
-  signals (`highway=crossing` + `crossing=traffic_signals`) are not included.
+  signals (`highway=crossing` + `crossing=traffic_signals`, or a signal node tagged
+  `traffic_signals=pedestrian_crossing` / `cyclist_crossing` / `crossing`) are not included. Ramp meters, emergency
+  and flashing signals are (OSM `traffic_signals=ramp_meter|emergency|blinker`).
 - OSM often maps one node per approach at a junction. Nodes within **30 m** of each other (chained) are merged into
   one light at their mean, so two separate lights under 30 m apart, such as a divided road's median crossing,
   count as one.

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { execFileSync } from 'node:child_process';
-import { mergeSignals, signalKey, signalTiles } from '../signals.mjs';
+import { isVehicleSignal, mergeSignals, signalKey, signalTiles } from '../signals.mjs';
 
 // ~1 m of latitude, in degrees.
 const M = 1 / 111_320;
@@ -26,6 +26,15 @@ test('lights over 30 m apart stay separate; a chain of close nodes is one', () =
   // Neighbours across a 0.001° grid line and across the 0.25° tile line still merge.
   assert.equal(mergeSignals([[-87.69, 41.74999], [-87.69, 41.75001]]).length, 1);
   assert.equal(mergeSignals([]).length, 0);
+});
+
+test('vehicle signals only: crossing-only signal nodes are dropped', () => {
+  assert.equal(isVehicleSignal({ highway: 'traffic_signals' }), true);
+  assert.equal(isVehicleSignal({ highway: 'traffic_signals', traffic_signals: 'signal' }), true);
+  assert.equal(isVehicleSignal({ highway: 'traffic_signals', traffic_signals: 'ramp_meter' }), true);
+  assert.equal(isVehicleSignal({ highway: 'traffic_signals', traffic_signals: 'pedestrian_crossing' }), false);
+  assert.equal(isVehicleSignal({ highway: 'traffic_signals', traffic_signals: 'cyclist_crossing' }), false);
+  assert.equal(isVehicleSignal({ highway: 'crossing', crossing: 'traffic_signals' }), false);
 });
 
 test('coordinates are rounded to 5 decimals', () => {
