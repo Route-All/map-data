@@ -13,6 +13,7 @@ driver data, and no credentials.
 | --- | --- | --- | --- |
 | Road tiles | `roads/current.json` → `roads/<buildId>/tiles/<row>_<col>.bin` | OpenStreetMap (Geofabrik US state extracts) | Daily check; rebuilt within 24 h of a newer extract |
 | Places (truck stops, fuel, rest areas, weigh stations) | `pois/current.json` → `pois/<buildId>/…` | OpenStreetMap, All The Places (CC0), US DOT NTAD Truck Stop Parking | With the roads |
+| Traffic signals | `signals/current.json` → `signals/v1/<buildId>/<row>_<col>.json` (format: `format/signals.md`) | OpenStreetMap (Geofabrik US state extracts) | With the roads |
 | Road work and closures | `events/v2/current.json` → `events/v2/manifests/…` → `events/v2/objects/<sha256>.json` (and the older `events/current.json` + `events/t/…`) | USDOT WZDx feed registry, state WZDx feeds, Caltrans Lane Closure System | Hourly |
 | Fuel prices | `fuel/current.json` | U.S. Energy Information Administration | Weekly |
 | Road tiles v2 (class, one-way, restrictions) | `roads/v2/current.json` → `roads/v2/<buildId>/manifest.json` (one entry per 2° block) → `roads/v2/blocks/<sha256>.json` (each tile's place, size and SHA-256) → byte ranges of `roads/v2/packs/<sha256>.bin` (road tile v3, `format/roadTile.mjs`). Builds before schema 3 list `roads/v2/objects/<sha256>.bin` directly | OpenStreetMap (Geofabrik US state extracts) | With the roads |
@@ -27,9 +28,9 @@ least 35 days. Each road-work manifest says, per feed and per tile, whether the 
 
 ## Attribution and licences
 
-- **OpenStreetMap.** Road and place data © OpenStreetMap contributors, available under the
-  [Open Database License (ODbL) 1.0](https://opendatacommons.org/licenses/odbl/). The road and
-  place tiles are a derived database and are published under the same licence. Any display of
+- **OpenStreetMap.** Road, place and traffic-signal data © OpenStreetMap contributors, available under the
+  [Open Database License (ODbL) 1.0](https://opendatacommons.org/licenses/odbl/). The road, place
+  and signal tiles are a derived database and are published under the same licence. Any display of
   this data must credit "© OpenStreetMap contributors".
 - **Extra places.** [All The Places](https://www.alltheplaces.xyz/) (CC0) and the U.S. DOT NTAD
   Truck Stop Parking dataset (public domain).
@@ -43,7 +44,7 @@ least 35 days. Each road-work manifest says, per feed and per tile, whether the 
 
 ## Layout
 
-- `roads/` — the builders (`build.sh`, `tile.mjs`, `pois.mjs`, `events.mjs`, `fuel.mjs`), the one
+- `roads/` — the builders (`build.sh`, `tile.mjs`, `pois.mjs`, `signals.mjs`, `events.mjs`, `fuel.mjs`), the one
   publisher (`publish.mjs`, `events.mjs`), the storage adapter (`store.mjs`), the Geofabrik check
   (`source-check.mjs`), the freshness check (`freshness.mjs`) and tests.
 - `.github/workflows/` — `roads.yml` (daily), `road-work.yml` (hourly at :17), `fuel.yml` (weekly),
