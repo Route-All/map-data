@@ -119,6 +119,10 @@ export function metresToRoad(grid, [lon, lat]) {
   }
   return best;
 }
+// An unnamed highway=services off the freeway network is a mall or a city block tagged as one, not a
+// stop (San Diego, 2026-11-01: two of three unnamed "truck stops" were 300 m+ from any freeway).
+export const isStrayServices = (place, grid) => place.cat === 'truck_stop' && !place.name && !place.diesel
+  && metresToRoad(grid, [place.lon, place.lat]) > STATION_NEAR_ROAD_M;
 export function isStateStation(place, grid) {
   return STATION_NAME.test(place.name) || (!place.name && metresToRoad(grid, [place.lon, place.lat]) <= STATION_NEAR_ROAD_M);
 }
@@ -128,7 +132,7 @@ async function add(work, state, roadsFile) {
   // Freeways, trunk roads and their ramps for this state (build.sh), to tell stations from private scales.
   const grid = roadGrid(roadsFile && fs.existsSync(roadsFile) ? fs.readFileSync(roadsFile, 'utf8').split('\n')
     .filter((l) => l.trim()).map((l) => JSON.parse(l.replace(/^\x1e/, '')).geometry.coordinates) : []);
-  let privateScales = 0;
+  let privateScales = 0, strayServices = 0;
   const raw = path.join(work, 'pois-raw');
   fs.mkdirSync(raw, { recursive: true });
   const buffered = new Map();
@@ -138,6 +142,7 @@ async function add(work, state, roadsFile) {
     const place = toPlace(JSON.parse(text.replace(/^\x1e/, '')));
     if (!place) continue;
     if (place.cat === 'weigh_station' && !isStateStation(place, grid)) { privateScales++; continue; }
+    if (isStrayServices(place, grid)) { strayServices++; continue; }
     place.st = st;
     count++;
     const key = placeKey(place.lat, place.lon);
@@ -145,7 +150,7 @@ async function add(work, state, roadsFile) {
     buffered.get(key).push(JSON.stringify(place) + '\n');
   }
   for (const [key, lines] of buffered) fs.appendFileSync(path.join(raw, key), lines.join(''));
-  console.log(`  ${count} places, ${privateScales} private scales left out`);
+  console.log(`  ${count} places, ${privateScales} private scales and ${strayServices} off-freeway service areas left out`);
 }
 
 // Border tiles hold the same place from two state extracts: keep the first per OSM id.
@@ -249,6 +254,45 @@ export function mergeExtras(rows, extras) {
   return rows.filter((row) => !row.gone);
 }
 
+// A truck stop OSM leaves unnamed is usually one part of a named site: the truck diesel island
+// (amenity=fuel + hgv=yes) beside the station's own pin, or the services area drawn around it.
+// 1,008 of 3,834 truck stops had no name on 2026-11-01; 616 had a named station within 100 m.
+// The pin takes the site's name, address, phone and hours, and the site's other pin goes, as
+// mergeExtras does for a chain's pumps. Nothing named nearby: say what it is instead of a blank.
+export const SITE_M = 150;
+export function nameUnnamedStops(rows) {
+  const named = rows.filter((r) => r.name && (r.cat === 'truck_stop' || r.cat === 'fuel'));
+  const grid = new Map();
+  const add = (r) => {
+    const k = `${Math.floor(r.lat * 100)}_${Math.floor(r.lon * 100)}`;
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(r);
+  };
+  named.forEach(add);
+  let borrowed = 0, merged = 0, described = 0;
+  for (const row of rows) {
+    if (row.cat !== 'truck_stop' || row.name || row.gone) continue;
+    let site = null, best = SITE_M;
+    const r0 = Math.floor(row.lat * 100), c0 = Math.floor(row.lon * 100);
+    for (let r = r0 - 1; r <= r0 + 1; r++) for (let c = c0 - 1; c <= c0 + 1; c++) for (const x of grid.get(`${r}_${c}`) ?? []) {
+      const d = metres(row, x);
+      if (!x.gone && d <= best) { site = x; best = d; }
+    }
+    if (!site) { row.name = row.diesel ? 'Truck Fuel' : 'Service Area'; described++; continue; }
+    // Already a named truck stop: this pin is a second point of it.
+    if (site.cat === 'truck_stop') {
+      for (const f of ['fuel', 'diesel', 'showers', 'food', 'scales']) site[f] = site[f] || row[f];
+      row.gone = true; merged++; continue;
+    }
+    Object.assign(row, { name: site.name, addr: row.addr ?? site.addr, phone: row.phone ?? site.phone,
+      hours: row.hours ?? site.hours, fuel: 1, food: row.food || site.food });
+    site.gone = true; borrowed++;
+    add(row); // the site's next unnamed pin (a second diesel island) merges into this one
+  }
+  console.log(`unnamed truck stops: ${borrowed} named from their site, ${merged} merged into a named stop, ${described} described`);
+  return rows.filter((r) => !r.gone);
+}
+
 // Ramps signposted to a weigh station ("Weigh Station", "Truck Scales"), from the destination tags
 // OSM mappers copy off the exit signs. Many stations are signed but never mapped as a place (I-15
 // at Rainbow, I-80 at Cordelia), so the sign is how we find them. The pin goes at the end of the
@@ -307,6 +351,7 @@ function finish(work) {
   let rows = uniquePlaces(fs.readdirSync(raw).flatMap((key) => fs.readFileSync(path.join(raw, key), 'utf8').split('\n')));
   const extrasFile = path.join(work, 'extras.jsonl');
   if (fs.existsSync(extrasFile)) rows = mergeExtras(rows, fs.readFileSync(extrasFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)));
+  rows = nameUnnamedStops(rows);
   // An unnamed scale at a truck stop is the truck stop's own scale, not the state's station.
   const stops = rows.filter((r) => r.cat === 'truck_stop');
   for (const r of rows) {
