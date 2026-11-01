@@ -1,5 +1,5 @@
 // Uploads a finished build (build.sh output) to R2 and makes it live. The one publish entry for
-// roads, places (KIND=pois) and fuel (KIND=fuel), for scheduled and manual runs alike:
+// roads, places (KIND=pois), traffic signals (KIND=signals) and fuel (KIND=fuel), for scheduled and manual runs alike:
 //   R2_S3_ENDPOINT=… R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=… node publish.mjs   R2's S3 API
 //   ROLLBACK=1 …   allows a build from older sources than the live one
 //   STORE_DIR=<folder> node publish.mjs                                           the same, into a folder
@@ -105,7 +105,7 @@ if (process.env.R2_ACCESS_KEY_ID || process.env.STORE_DIR) {
   const { openStore, withLock } = await import('./store.mjs');
   const store = await openStore(process.env.STORE_DIR);
   const run = KIND === 'fuel' ? publishFuel : KIND === 'roads2' ? (st, h) => publishAddressed(st, h, ROADS_V2)
-    : KIND === 'boundaries' ? (st, h) => publishAddressed(st, h, BOUNDARIES) : publishBuild;
+    : KIND === 'boundaries' ? (st, h) => publishAddressed(st, h, BOUNDARIES) : KIND === 'signals' ? publishSignals : publishBuild;
   await withLock(store, KIND, (KIND === 'fuel' ? 1 : 6) * 3_600_000, (holding) => run(store, holding));
   process.exit(0);
 }
@@ -172,6 +172,50 @@ async function publishFuel(store, holding) {
   await holding();
   await store.put('fuel/current.json', text, { cache: POINTER_CACHE });
   console.log('live: fuel/current.json');
+}
+
+/**
+ * Traffic signals (signals.mjs, format/signals.md): an additive dataset beside the places, with its own pointer
+ * signals/current.json = { version, deg, path } and nothing else, the contract the app reads. Tiles go up like the
+ * place tiles (gzip, unchanged ones copied), then signals/v1/<id>/build.json, then the pointer LAST. The build that
+ * this one replaced is remembered in build.json rather than the pointer; builds other than current and previous are
+ * deleted once their successor has been live a day.
+ */
+async function publishSignals(store, holding) {
+  const { md5, pool } = await import('./store.mjs');
+  const build = JSON.parse(fs.readFileSync(path.join(WORK, 'signals.json'), 'utf8'));
+  const dir = path.join(WORK, 'signals'), prefix = (id) => `signals/v1/${id}/`;
+  const files = fs.readdirSync(dir).filter((f) => /^-?\d+_-?\d+\.json$/.test(f));
+  if (files.length !== build.tileCount) throw new Error(`${files.length} signal tiles on disk, signals.json says ${build.tileCount}`);
+  const live = await store.getJson('signals/current.json');
+  // A build id is its build time, so an older id is an older build.
+  if (live && live.version > build.buildId && !ROLLBACK) throw new Error(`live signals build ${live.version} is newer than ${build.buildId}; ROLLBACK=1 to go back`);
+  console.log(`uploading signals ${build.buildId} (${files.length} tiles); live is ${live?.version ?? 'none'}`);
+  const etags = async (id) => new Map((await store.list(prefix(id))).map((o) => [o.key.slice(prefix(id).length), o.etag]));
+  const already = await etags(build.buildId);
+  const before = live && live.version !== build.buildId ? await etags(live.version) : new Map();
+  const counts = { uploaded: 0, copied: 0, skipped: 0 };
+  const opts = { type: 'application/octet-stream', cache: TILE_CACHE };
+  await pool(files, 32, async (f) => {
+    const bytes = fs.readFileSync(path.join(dir, f)), sum = md5(bytes);
+    if (already.get(f) === sum) counts.skipped++;
+    else if (before.get(f) === sum) { await store.copy(`${prefix(live.version)}${f}`, `${prefix(build.buildId)}${f}`, opts); counts.copied++; }
+    else { await store.put(`${prefix(build.buildId)}${f}`, bytes, opts); counts.uploaded++; }
+  });
+  console.log(`signal tiles in place: ${JSON.stringify(counts)}`);
+  const previous = live?.version === build.buildId ? (await store.getJson(`${prefix(build.buildId)}build.json`))?.previous : live?.version;
+  await store.put(`${prefix(build.buildId)}build.json`, JSON.stringify({ ...build, ...(previous && { previous }) }), { cache: TILE_CACHE });
+  await holding();
+  await store.put('signals/current.json', JSON.stringify({ version: build.buildId, deg: build.deg, path: `signals/v1/${build.buildId}` }), { cache: POINTER_CACHE });
+  console.log(`live: signals ${build.buildId}`);
+  const ids = [...new Set((await store.list('signals/v1/')).map((o) => o.key.match(/^signals\/v1\/(\d{8}T\d{6}Z)\//)?.[1]).filter(Boolean))].sort();
+  const retire = ids.filter((id, i) => id !== build.buildId && id !== previous && ids[i + 1] && Date.now() - stampOf(ids[i + 1]) > DAY);
+  for (const id of retire) {
+    const keys = (await store.list(prefix(id))).map((o) => o.key);
+    await holding();
+    await store.remove(keys);
+    console.log(`signals ${id} deleted (${keys.length} objects)`);
+  }
 }
 
 /** Newest source date of a build: Geofabrik's replication time for roads, the build time for places. */
@@ -297,6 +341,7 @@ function wrangler() {
 }
 
 // LEGACY path from here on (no lock, retirement by lifecycle rule).
+if (KIND === 'signals') throw new Error('KIND=signals publishes only through R2_* or STORE_DIR');
 console.log('LEGACY REST/wrangler path: no lock. The public data repo publishes through R2_* instead.');
 const r2 = process.env.WRANGLER ? wrangler() : rest();
 // KIND=fuel serves the week's fuel averages (fuel.mjs): one small file, no build or tiles.

@@ -3,7 +3,7 @@
 #   roads/build.sh                      all states, into roads/.build
 #   STATES="delaware maryland" roads/build.sh
 #   WORK=/somewhere KEEP_PBF=1 ...      keep the downloads and reuse them on re-runs
-# Output: $WORK/tiles/<row>_<col>.bin and $WORK/build.json. publish.mjs uploads them.
+# Output: $WORK/tiles/<row>_<col>.bin and $WORK/build.json (and places, signals). publish.mjs uploads them.
 # One state at a time, deleting each download when done, so it fits a GitHub runner's disk.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -14,12 +14,14 @@ STATES=${STATES:-"alabama alaska arizona arkansas california colorado connecticu
   ohio oklahoma oregon pennsylvania rhode-island south-carolina south-dakota tennessee texas utah vermont virginia
   washington west-virginia wisconsin wyoming"}
 WORK=${WORK:-.build}
-rm -rf "$WORK/raw" "$WORK/raw2" "$WORK/tiles" "$WORK/tiles2" "$WORK/manifest2.json" "$WORK/sources.txt" "$WORK/build.json" "$WORK/pois-raw" "$WORK/pois" "$WORK/pois.json" "$WORK/extras.jsonl" "$WORK/signs.jsonl" "$WORK/weigh-station-gaps.geojson"
+rm -rf "$WORK/raw" "$WORK/raw2" "$WORK/tiles" "$WORK/tiles2" "$WORK/manifest2.json" "$WORK/sources.txt" "$WORK/build.json" "$WORK/pois-raw" "$WORK/pois" "$WORK/pois.json" "$WORK/extras.jsonl" "$WORK/signs.jsonl" "$WORK/weigh-station-gaps.geojson" "$WORK/signals-raw.csv" "$WORK/signals" "$WORK/signals.json"
 mkdir -p "$WORK/pbf"
 # The tags the app reads plus v2's raw evidence (format/roadTile.mjs TAGS). area_tags=false keeps closed ways
 # (roundabouts) as lines.
 echo '{"attributes":{"id":true},"linear_tags":true,"area_tags":false,"include_tags":["highway","ref","name","oneway","junction","service","layer","bridge","tunnel","access","hgv","maxheight","maxwidth","maxweight"]}' > "$WORK/export.json"
 echo '{"attributes":{"id":true},"linear_tags":true,"area_tags":false,"include_tags":["highway","ref","destination","destination:lanes","destination:street","exit_to"]}' > "$WORK/signs.json"
+# Traffic signals (signals.mjs): the node, its id and what kind of signal it is.
+echo '{"attributes":{"id":true},"linear_tags":false,"area_tags":false,"include_tags":["highway","traffic_signals"]}' > "$WORK/signal-tags.json"
 # Places (pois.mjs): the tags that say what a place is and what it offers a truck.
 echo '{"attributes":{"id":true},"linear_tags":false,"area_tags":true,"include_tags":["amenity","highway","name","brand","hgv","fuel","fuel:diesel","fuel:HGV_diesel","shower","showers","food","restaurant","opening_hours","phone","contact:phone","capacity:hgv","truck_wash","addr:housenumber","addr:street","addr:city"]}' > "$WORK/places.json"
 
@@ -52,6 +54,12 @@ for state in $STATES; do
   osmium export "$WORK/signed.pbf" -c "$WORK/signs.json" -f geojsonseq -x print_record_separator=false \
     --geometry-types=linestring -o - | node pois.mjs signs "$WORK" "$state"
   rm -f "$WORK/signed.pbf"
+  # Traffic lights for "at the second light" (signals.mjs). highway=crossing pedestrian signals are not matched;
+  # signals.mjs drops the crossing-only ones.
+  osmium tags-filter "$pbf" n/highway=traffic_signals -o "$WORK/signals.pbf" --overwrite
+  osmium export "$WORK/signals.pbf" -c "$WORK/signal-tags.json" -f geojsonseq -x print_record_separator=false \
+    --geometry-types=point -o - | node signals.mjs add "$WORK"
+  rm -f "$WORK/signals.pbf"
   [ -n "${KEEP_PBF:-}" ] || rm -f "$pbf"
   echo "  $((SECONDS - start)) s"
 done
@@ -60,3 +68,4 @@ node tile.mjs finish "$WORK"
 # Truck-stop chains, CAT Scales, truck washes and the DOT parking survey (extras.mjs), merged in by finish.
 node extras.mjs "$WORK"
 node pois.mjs finish "$WORK"
+node signals.mjs finish "$WORK"

@@ -2,7 +2,7 @@
 #
 # Asks Geofabrik first (roads/source-check.mjs) and builds only when a state has a newer extract
 # than the live build, so a new extract goes live within a day. Then cuts every US state + DC into
-# road tiles (v1, and v2: road tile v3 in 2° packs read by byte range), the state-boundary grid and place tiles and publishes them through R2's S3 API (roads/publish.mjs): tiles
+# road tiles (v1, and v2: road tile v3 in 2° packs read by byte range), the state-boundary grid, place tiles and traffic-signal tiles and publishes them through R2's S3 API (roads/publish.mjs): tiles
 # first, then build.json, then <kind>/current.json last, inside a one-writer lock. Any failed step
 # stops the job before the pointer moves, and GitHub emails the failure.
 #
@@ -100,6 +100,16 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: KIND=roads2 node publish.mjs && KIND=boundaries node publish.mjs
 
+      # Traffic signals (signals.mjs, format/signals.md): an additive dataset, published last so a failure here never
+      # holds back the roads, places or boundaries.
+      - name: Publish traffic signals
+        if: steps.source.outputs.newer == 'true'
+        env:
+          R2_S3_ENDPOINT: ${{ secrets.R2_S3_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: KIND=signals node publish.mjs
+
       # Proves THIS run went live, not just that some pointer exists. The query string skips the
       # edge cache. Reads only the public domain.
       - name: Both builds are live
@@ -119,6 +129,10 @@ jobs:
             echo "$prefix: built $want, live $live"
             [ "$want" = "$live" ] || { echo "::error::$prefix/current.json still points at $live"; exit 1; }
           done
+          want=$(node -p "require('./.build/signals.json').buildId")
+          live=$(curl -fsS "https://tiles.routeall.app/signals/current.json?run=$GITHUB_RUN_ID" | node -p "JSON.parse(require('fs').readFileSync(0)).version")
+          echo "signals: built $want, live $live"
+          [ "$want" = "$live" ] || { echo "::error::signals/current.json still points at $live"; exit 1; }
           # Road tiles v2: the live manifest is the one the pointer names (SHA-256), and one block manifest and one tile
           # head read back by byte range match the hashes listed for them.
           node --input-type=module -e "
