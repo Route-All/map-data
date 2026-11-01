@@ -35,7 +35,9 @@ await check('events', async () => {
   if (age(manifest.builtAt) > 3) alerts.push(`events: last published ${age(manifest.builtAt).toFixed(1)} h ago (${manifest.builtAt})`);
   const previous = pointer.previous ? await get(pointer.previous).catch(() => null) : null;
   for (const [id, f] of Object.entries(manifest.feeds).sort()) {
-    if (!f.lastValidatedAt) alerts.push(`events/${id}: never checked successfully (${f.error ?? f.status})`);
+    // A source that has never answered (NM 503, NY's HTML page) carries no data to go stale: skipped, noted,
+    // not failed (owner, 2026-10-31). One that answered before and stopped is still an alert.
+    if (!f.lastValidatedAt) console.log(`SKIP events/${id}: has never answered (${f.error ?? f.status})`);
     else if (age(f.lastValidatedAt) > 24) alerts.push(`events/${id}: last checked ${age(f.lastValidatedAt).toFixed(1)} h ago (${f.error ?? f.status})`);
     const before = previous?.feeds?.[id]?.total;
     if (before >= 20 && (f.total ?? 0) < before / 2) alerts.push(`events/${id}: ${f.total ?? 0} rows, down from ${before}`);
