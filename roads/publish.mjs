@@ -141,7 +141,11 @@ async function publishAddressed(store, holding, kind) {
   // The publication ledger: when each build became current, so retention counts from its actual replacement.
   const ledgerKey = `${kind.prefix}/published.json`;
   const ledger = (await store.getJson(ledgerKey))?.builds ?? (live && live.buildId !== manifest.buildId ? [{ buildId: live.buildId, at: null }] : []);
-  if (ledger.at(-1)?.buildId !== manifest.buildId) ledger.push({ buildId: manifest.buildId, at: new Date(nowMs()).toISOString() });
+  const stamp = new Date(nowMs()).toISOString();
+  // The build being replaced went live, but its own ledger write can have failed after the pointer moved. Record it
+  // now, as current until this moment: unknown, it would age from the ledger's start and go before its 35 days.
+  if (live && live.buildId !== manifest.buildId && !ledger.some((b) => b.buildId === live.buildId)) ledger.push({ buildId: live.buildId, at: stamp });
+  if (ledger.at(-1)?.buildId !== manifest.buildId) ledger.push({ buildId: manifest.buildId, at: stamp });
   await store.put(ledgerKey, JSON.stringify({ schema: 1, builds: ledger }), { type: 'application/json', cache: POINTER_CACHE });
 
   // Mark and sweep, still holding the lock: block manifests and packs (schema 3) are marked like tiles (schema 2).
