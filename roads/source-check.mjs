@@ -11,7 +11,8 @@ const live = await fetch(`${ORIGIN}/roads/current.json?t=${Date.now()}`).then((r
 if (process.argv.includes('--force')) say(true, 'forced');
 else if (!live?.sourceDates) say(true, 'no live build with source dates');
 else {
-  // Geofabrik's server sometimes stalls a request: 20 s each, three tries, then the job fails.
+  // Geofabrik's server sometimes stalls a request or answers 502 for a few minutes: 20 s each, five
+  // tries with 30 s, 60 s, 90 s, 120 s between them (about 7 minutes in all), then the job fails.
   const stateTxt = async (state) => {
     for (let attempt = 1; ; attempt++) {
       try {
@@ -19,7 +20,9 @@ else {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return await res.text();
       } catch (e) {
-        if (attempt === 3) throw new Error(`${state}: Geofabrik state.txt ${e.message}`);
+        if (attempt === 5) throw new Error(`${state}: Geofabrik state.txt ${e.message}`);
+        console.error(`${state}: Geofabrik state.txt ${e.message}, retrying`);
+        await new Promise((r) => setTimeout(r, attempt * 30_000));
       }
     }
   };
