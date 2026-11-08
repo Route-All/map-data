@@ -1,7 +1,7 @@
 // Road route relations → which routes each way carries. build.sh pipes one state's relations in as OPL:
 //   osmium tags-filter <pbf> r/route=road -R | osmium cat -f opl | node routes.mjs > <work>/routes.tsv
-// and tile.mjs keeps the result as the way's `routes` tag (format/roadTile.mjs TAGS): `network|ref|modifier|role` per
-// relation, joined by ";". The app matches a permit's printed road to these (services/routeLabels.ts in the app):
+// and tile.mjs keeps the result as the way's `routes` tag (format/roadTile.mjs TAGS): `network|ref|modifier|role|direction`
+// per relation, joined by ";". `direction` is the relation's own ("north" on one carriageway's Interstate relation), else empty. The app matches a permit's printed road to these (services/routeLabels.ts in the app):
 // a Texas frontage road carrying the freeway's name is in no Interstate relation, so it is never the freeway.
 import readline from 'node:readline';
 
@@ -18,10 +18,10 @@ export function relationEntries(line) {
   const m = parts.find((p) => p.startsWith('M'))?.slice(1) ?? '';
   const tags = Object.fromEntries(t ? t.split(',').map((kv) => { const eq = kv.indexOf('='); return [unescape(kv.slice(0, eq)), unescape(kv.slice(eq + 1))]; }) : []);
   if (tags.type !== 'route' || tags.route !== 'road' || !tags.ref) return [];
-  const head = `${field(tags.network)}|${field(tags.ref)}|${field(tags.modifier)}`;
+  const head = `${field(tags.network)}|${field(tags.ref)}|${field(tags.modifier)}`, dir = field(tags.direction);
   return (m ? m.split(',') : []).filter((x) => x.startsWith('w')).map((x) => {
     const at = x.indexOf('@');
-    return [x.slice(1, at), `${head}|${field(unescape(x.slice(at + 1)))}`];
+    return [x.slice(1, at), `${head}|${field(unescape(x.slice(at + 1)))}|${dir}`];
   });
 }
 

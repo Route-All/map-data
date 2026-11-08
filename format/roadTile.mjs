@@ -32,7 +32,7 @@ export const HEADER_BYTES = 28;
 export const PER_DEGREE = 4;
 /**
  * The OSM tags kept per way, as raw evidence for routing and clearance. `routes` is not an OSM way tag: it is the road route
- * relations the way belongs to (roads/routes.mjs), `network|ref|modifier|role` joined by ";". Older readers ignore it.
+ * relations the way belongs to (roads/routes.mjs), `network|ref|modifier|role|direction` joined by ";". Older readers ignore it.
  */
 export const TAGS = ['highway', 'oneway', 'junction', 'service', 'layer', 'bridge', 'tunnel', 'access', 'hgv',
   'maxheight', 'maxwidth', 'maxweight', 'routes'];
