@@ -59,9 +59,18 @@ async function add(work) {
     bytes = 0;
   };
   const push = (map, key, line) => { if (!map.has(key)) map.set(key, []); map.get(key).push(line); bytes += line.length; };
+  // This state's road route relations by way (build.sh, routes.mjs), kept as the way's `routes` tag.
+  const routesFile = path.join(work, 'routes.tsv'), routes = new Map();
+  if (fs.existsSync(routesFile)) for (const line of fs.readFileSync(routesFile, 'utf8').split('\n')) {
+    const tab = line.indexOf('\t');
+    if (tab > 0) routes.set(line.slice(0, tab), line.slice(tab + 1));
+  }
   for await (const text of readline.createInterface({ input: process.stdin, crlfDelay: Infinity })) {
     if (!text.trim()) continue;
-    const out = toLine(JSON.parse(text.replace(/^\x1e/, '')));
+    const feature = JSON.parse(text.replace(/^\x1e/, ''));
+    const carried = routes.get(String(feature.properties?.['@id']));
+    if (carried) feature.properties.routes = carried;
+    const out = toLine(feature);
     if (!out) continue;
     ways++;
     if (out.v1) named++;

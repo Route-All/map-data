@@ -105,3 +105,14 @@ test('the reference decoder refuses to decode more than its budget', () => {
 test('a tile holds each distinct ref/name once and drops a way seen twice', () => {
   assert.deepEqual(packTile([toLine(I95).v1, toLine(I95).v1, toLine(I295).v1].join('').split('\n')), tile(I95, I295));
 });
+
+test('road route relations become each member way\'s routes tag; other relations and non-way members do not', async () => {
+  const { relationEntries } = await import('../routes.mjs');
+  assert.deepEqual(relationEntries('r100 v1 Ttype=route,route=road,network=US:I,ref=35E,direction=north Mw10@forward,n1@stop,w12@'),
+    [['10', 'US:I|35E||forward'], ['12', 'US:I|35E||']]);
+  assert.deepEqual(relationEntries('r101 v1 Ttype=route,route=road,network=US:US:Business,ref=69;77,modifier=Business Mw10@'), [['10', 'US:US:Business|69/77|Business|']]);
+  assert.deepEqual(relationEntries('r102 v1 Ttype=route,route=bus,ref=9 Mw11@'), []);
+  assert.deepEqual(relationEntries('w10 v1 Thighway=motorway Nn1,n2'), []);
+  const line = toLine(feature(10, { ref: 'I 35E', routes: 'US:I|35E||forward' }, [[-96.8, 32.7], [-96.8, 32.71]]));
+  assert.equal(JSON.parse(line.v2.trim().split('\t')[4]).routes, 'US:I|35E||forward');
+});
