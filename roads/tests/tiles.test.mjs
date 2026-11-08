@@ -116,3 +116,18 @@ test('road route relations become each member way\'s routes tag; other relations
   const line = toLine(feature(10, { ref: 'I 35E', routes: 'US:I|35E||forward' }, [[-96.8, 32.7], [-96.8, 32.71]]));
   assert.equal(JSON.parse(line.v2.trim().split('\t')[4]).routes, 'US:I|35E||forward');
 });
+
+test('a route crossing a state line is placed on the line, in each direction it can be driven', async () => {
+  const { buildGrid } = await import('../../format/stateBoundary.mjs');
+  const { wayCrossings } = await import('../crossings.mjs');
+  // Two square states meeting at lon -90.
+  const sq = (w, e) => [[[w, 34], [e, 34], [e, 35], [w, 35]]];
+  const grid = buildGrid([{ code: 'MS', polygons: [sq(-91, -90)] }, { code: 'AL', polygons: [sq(-90, -89)] }]);
+  const line = [[-90.3, 34.5], [-90.1, 34.5], [-89.8, 34.5]];
+  const two = await wayCrossings(grid, { id: 7, routes: 'US:US|72|||', oneway: null, coords: line });
+  assert.deepEqual(two.map((c) => [c.from, c.to, c.bearing]), [['MS', 'AL', 90], ['AL', 'MS', 270]]);
+  assert.ok(Math.abs(two[0].at[0] + 90) < 1e-5 && two[0].at[1] === 34.5);
+  const one = await wayCrossings(grid, { id: 8, routes: 'US:I|22||forward|east', oneway: 'yes', coords: line });
+  assert.deepEqual(one.map((c) => [c.from, c.to, c.network, c.ref, c.direction]), [['MS', 'AL', 'US:I', '22', 'east']]);
+  assert.deepEqual(await wayCrossings(grid, { id: 9, routes: 'US:US|72|||', oneway: null, coords: [[-90.5, 34.5], [-90.2, 34.6]] }), []);
+});

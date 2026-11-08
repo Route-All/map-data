@@ -88,10 +88,11 @@ jobs:
           CLOUDFLARE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_PURGE_TOKEN }}
         run: node publish.mjs && KIND=pois node publish.mjs
 
-      # The state-boundary grid (format/stateBoundary.mjs) from Census TIGER/Line; unchanged blocks keep their hash.
-      - name: Build state boundaries
+      # The state-boundary grid (format/stateBoundary.mjs) from Census TIGER/Line; unchanged blocks keep their hash. Then where each
+      # numbered route crosses a state line (crossings.mjs), listed in the same manifest.
+      - name: Build state boundaries and route crossings
         if: steps.source.outputs.newer == 'true'
-        run: node boundaries.mjs .build
+        run: node boundaries.mjs .build && node crossings.mjs .build
 
       - name: Publish roads (v2), then boundaries
         if: steps.source.outputs.newer == 'true'
