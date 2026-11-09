@@ -48,8 +48,9 @@ test('names: refs by name, relation refs with their network word, unsigned SR nu
 test('names: finish lists every state with size and SHA-256; publish puts them under the pointer, pointer last', () => {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-')), store = fs.mkdtempSync(path.join(os.tmpdir(), 'store-'));
   for (const st of ['texas', 'oklahoma']) execFileSync('python3', [path.join(DIR, 'names.py'), st, path.join(work, 'names')], { input: OPL });
-  fs.writeFileSync(path.join(work, 'sources.txt'), 'texas 2026-11-08\noklahoma 2026-11-08\n');
-  execFileSync('node', [path.join(DIR, 'names.mjs'), 'finish', work]);
+  // extras.mjs adds non-state sources to sources.txt (2026-11-09: "51 road-name files for 53 states"); they don't count.
+  fs.writeFileSync(path.join(work, 'sources.txt'), 'texas 2026-11-08\noklahoma 2026-11-08\nalltheplaces 2026-10-31\nntad-truck-stop-parking 2026-11-09\n');
+  execFileSync('node', [path.join(DIR, 'names.mjs'), 'finish', work, '2']);
   const build = JSON.parse(fs.readFileSync(path.join(work, 'names.json'), 'utf8'));
   assert.deepEqual(Object.keys(build.states), ['OK', 'TX']);
   execFileSync('node', [path.join(DIR, 'publish.mjs')], { env: { ...process.env, STORE_DIR: store, WORK: work, KIND: 'names' } });
@@ -64,6 +65,6 @@ test('names: finish lists every state with size and SHA-256; publish puts them u
 test('names: finish refuses a build missing a state', () => {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
   execFileSync('python3', [path.join(DIR, 'names.py'), 'texas', path.join(work, 'names')], { input: OPL });
-  fs.writeFileSync(path.join(work, 'sources.txt'), 'texas x\noklahoma x\n');
-  assert.throws(() => execFileSync('node', [path.join(DIR, 'names.mjs'), 'finish', work], { stdio: 'pipe' }), /1 road-name files for 2 states/);
+  assert.throws(() => execFileSync('node', [path.join(DIR, 'names.mjs'), 'finish', work, '2'], { stdio: 'pipe' }), /1 road-name files for 2 states/);
+  assert.throws(() => execFileSync('node', [path.join(DIR, 'names.mjs'), 'finish', work], { stdio: 'pipe' }), /usage/);
 });
