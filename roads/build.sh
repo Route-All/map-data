@@ -3,7 +3,7 @@
 #   roads/build.sh                      all states, into roads/.build
 #   STATES="delaware maryland" roads/build.sh
 #   WORK=/somewhere KEEP_PBF=1 ...      keep the downloads and reuse them on re-runs
-# Output: $WORK/tiles/<row>_<col>.bin and $WORK/build.json (and places, signals). publish.mjs uploads them.
+# Output: $WORK/tiles/<row>_<col>.bin and $WORK/build.json (and places, signals, road names). publish.mjs uploads them.
 # One state at a time, deleting each download when done, so it fits a GitHub runner's disk.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -14,7 +14,7 @@ STATES=${STATES:-"alabama alaska arizona arkansas california colorado connecticu
   ohio oklahoma oregon pennsylvania rhode-island south-carolina south-dakota tennessee texas utah vermont virginia
   washington west-virginia wisconsin wyoming"}
 WORK=${WORK:-.build}
-rm -rf "$WORK/raw" "$WORK/raw2" "$WORK/tiles" "$WORK/tiles2" "$WORK/manifest2.json" "$WORK/sources.txt" "$WORK/build.json" "$WORK/pois-raw" "$WORK/pois" "$WORK/pois.json" "$WORK/extras.jsonl" "$WORK/signs.jsonl" "$WORK/weigh-station-gaps.geojson" "$WORK/signals-raw.csv" "$WORK/signals" "$WORK/signals.json"
+rm -rf "$WORK/raw" "$WORK/raw2" "$WORK/tiles" "$WORK/tiles2" "$WORK/manifest2.json" "$WORK/sources.txt" "$WORK/build.json" "$WORK/pois-raw" "$WORK/pois" "$WORK/pois.json" "$WORK/extras.jsonl" "$WORK/signs.jsonl" "$WORK/weigh-station-gaps.geojson" "$WORK/signals-raw.csv" "$WORK/signals" "$WORK/signals.json" "$WORK/names" "$WORK/names.json"
 mkdir -p "$WORK/pbf"
 # The tags the app reads plus v2's raw evidence (format/roadTile.mjs TAGS). area_tags=false keeps closed ways
 # (roundabouts) as lines.
@@ -60,6 +60,11 @@ for state in $STATES; do
   osmium export "$WORK/signals.pbf" -c "$WORK/signal-tags.json" -f geojsonseq -x print_record_separator=false \
     --geometry-types=point -o - | node signals.mjs add "$WORK"
   rm -f "$WORK/signals.pbf"
+  # Road names (names.py): every name a numbered road goes by, so a permit's printed numbers read on named pavement.
+  osmium tags-filter "$pbf" w/highway=motorway,motorway_link,trunk,trunk_link,primary,primary_link,secondary,secondary_link,tertiary,unclassified \
+    r/route=road -o "$WORK/names.pbf" --overwrite
+  osmium add-locations-to-ways "$WORK/names.pbf" -f opl -o - | python3 names.py "$state" "$WORK/names"
+  rm -f "$WORK/names.pbf"
   [ -n "${KEEP_PBF:-}" ] || rm -f "$pbf"
   echo "  $((SECONDS - start)) s"
 done
@@ -69,3 +74,4 @@ node tile.mjs finish "$WORK"
 node extras.mjs "$WORK"
 node pois.mjs finish "$WORK"
 node signals.mjs finish "$WORK"
+node names.mjs finish "$WORK"

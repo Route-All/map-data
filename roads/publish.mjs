@@ -1,5 +1,5 @@
 // Uploads a finished build (build.sh output) to R2 and makes it live. The one publish entry for
-// roads, places (KIND=pois), traffic signals (KIND=signals) and fuel (KIND=fuel), for scheduled and manual runs alike:
+// roads, places (KIND=pois), traffic signals (KIND=signals), road names (KIND=names) and fuel (KIND=fuel), for scheduled and manual runs alike:
 //   R2_S3_ENDPOINT=… R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=… node publish.mjs   R2's S3 API
 //   ROLLBACK=1 …   allows a build from older sources than the live one
 //   STORE_DIR=<folder> node publish.mjs                                           the same, into a folder
@@ -105,7 +105,8 @@ if (process.env.R2_ACCESS_KEY_ID || process.env.STORE_DIR) {
   const { openStore, withLock } = await import('./store.mjs');
   const store = await openStore(process.env.STORE_DIR);
   const run = KIND === 'fuel' ? publishFuel : KIND === 'roads2' ? (st, h) => publishAddressed(st, h, ROADS_V2)
-    : KIND === 'boundaries' ? (st, h) => publishAddressed(st, h, BOUNDARIES) : KIND === 'signals' ? publishSignals : publishBuild;
+    : KIND === 'boundaries' ? (st, h) => publishAddressed(st, h, BOUNDARIES) : KIND === 'signals' ? publishSignals
+    : KIND === 'names' ? publishNames : publishBuild;
   await withLock(store, KIND, (KIND === 'fuel' ? 1 : 6) * 3_600_000, (holding) => run(store, holding));
   process.exit(0);
 }
@@ -176,6 +177,52 @@ async function publishFuel(store, holding) {
   await holding();
   await store.put('fuel/current.json', text, { cache: POINTER_CACHE });
   console.log('live: fuel/current.json');
+}
+
+/**
+ * Road names (names.py, names.mjs, format/names.md): one gzip file per state under names/v1/<id>/<ST>.json.gz, and the
+ * pointer names/current.json = { version, path, states: { ST: { bytes, sha256 } } }, the contract the app reads: it
+ * downloads only the states a route needs and refuses a file whose size or hash differs. Files go up first (unchanged
+ * ones copied from the live build), then build.json, then the pointer LAST; builds other than current and previous are
+ * deleted once their successor has been live a day.
+ */
+async function publishNames(store, holding) {
+  const { md5, pool } = await import('./store.mjs');
+  const build = JSON.parse(fs.readFileSync(path.join(WORK, 'names.json'), 'utf8'));
+  const dir = path.join(WORK, 'names'), prefix = (id) => `names/v1/${id}/`;
+  const files = Object.keys(build.states).map((st) => `${st}.json.gz`);
+  for (const f of files) {
+    const st = build.states[f.slice(0, 2)], bytes = fs.readFileSync(path.join(dir, f));
+    if (bytes.length !== st.bytes) throw new Error(`${f} is ${bytes.length} bytes, names.json says ${st.bytes}`);
+  }
+  const live = await store.getJson('names/current.json');
+  if (live && live.version > build.buildId && !ROLLBACK) throw new Error(`live names build ${live.version} is newer than ${build.buildId}; ROLLBACK=1 to go back`);
+  console.log(`uploading road names ${build.buildId} (${files.length} states); live is ${live?.version ?? 'none'}`);
+  const etags = async (id) => new Map((await store.list(prefix(id))).map((o) => [o.key.slice(prefix(id).length), o.etag]));
+  const already = await etags(build.buildId);
+  const before = live && live.version !== build.buildId ? await etags(live.version) : new Map();
+  const counts = { uploaded: 0, copied: 0, skipped: 0 };
+  const opts = { type: 'application/octet-stream', cache: TILE_CACHE };
+  await pool(files, 16, async (f) => {
+    const bytes = fs.readFileSync(path.join(dir, f)), sum = md5(bytes);
+    if (already.get(f) === sum) counts.skipped++;
+    else if (before.get(f) === sum) { await store.copy(`${prefix(live.version)}${f}`, `${prefix(build.buildId)}${f}`, opts); counts.copied++; }
+    else { await store.put(`${prefix(build.buildId)}${f}`, bytes, opts); counts.uploaded++; }
+  });
+  console.log(`road-name files in place: ${JSON.stringify(counts)}`);
+  const previous = live?.version === build.buildId ? (await store.getJson(`${prefix(build.buildId)}build.json`))?.previous : live?.version;
+  await store.put(`${prefix(build.buildId)}build.json`, JSON.stringify({ ...build, ...(previous && { previous }) }), { cache: TILE_CACHE });
+  await holding();
+  await store.put('names/current.json', JSON.stringify({ version: build.buildId, path: `names/v1/${build.buildId}`, states: build.states }), { cache: POINTER_CACHE });
+  console.log(`live: road names ${build.buildId}`);
+  const ids = [...new Set((await store.list('names/v1/')).map((o) => o.key.match(/^names\/v1\/(\d{8}T\d{6}Z)\//)?.[1]).filter(Boolean))].sort();
+  const retire = ids.filter((id, i) => id !== build.buildId && id !== previous && ids[i + 1] && Date.now() - stampOf(ids[i + 1]) > DAY);
+  for (const id of retire) {
+    const keys = (await store.list(prefix(id))).map((o) => o.key);
+    await holding();
+    await store.remove(keys);
+    console.log(`road names ${id} deleted (${keys.length} objects)`);
+  }
 }
 
 /**
@@ -345,7 +392,7 @@ function wrangler() {
 }
 
 // LEGACY path from here on (no lock, retirement by lifecycle rule).
-if (KIND === 'signals') throw new Error('KIND=signals publishes only through R2_* or STORE_DIR');
+if (KIND === 'signals' || KIND === 'names') throw new Error(`KIND=${KIND} publishes only through R2_* or STORE_DIR`);
 console.log('LEGACY REST/wrangler path: no lock. The public data repo publishes through R2_* instead.');
 const r2 = process.env.WRANGLER ? wrangler() : rest();
 // KIND=fuel serves the week's fuel averages (fuel.mjs): one small file, no build or tiles.
