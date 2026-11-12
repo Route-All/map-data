@@ -29,7 +29,9 @@ import { execFileSync } from 'node:child_process';
 const WORK = process.env.WORK ?? new URL('.build', import.meta.url).pathname;
 const BUCKET = process.env.R2_BUCKET ?? 'routeall-roads';
 const TILE_CACHE = 'public, max-age=31536000, immutable'; // a build's tiles never change
-const POINTER_CACHE = 'public, max-age=300'; // a new build reaches the edge within 5 minutes
+const POINTER_CACHE = 'public, max-age=300'; // edge 300 s (Cloudflare .json cache rule) + browser 300 s: up to ~10 minutes, unless purgeEdge runs
+// tiles.routeall.app's zone. A pointer's edge copy is dropped right after it moves (purgeEdge).
+const PUBLIC_HOST = 'tiles.routeall.app', ZONE_ID = process.env.CLOUDFLARE_ZONE_ID ?? '48cb7d46a5211b37e32d3ac745a8c5a6';
 const PARALLEL = 24;
 const DAY = 86_400_000;
 const ROLLBACK = process.env.ROLLBACK === '1';
@@ -116,6 +118,10 @@ async function publishAddressed(store, holding, kind) {
   const manifestText = fs.readFileSync(kind.manifest(), 'utf8'), manifest = JSON.parse(manifestText);
   const objects = await kind.objects(manifest, async (o) => JSON.parse(fs.readFileSync(path.join(kind.dir(), kind.local(o)), 'utf8')));
   const live = await store.getJson(`${kind.prefix}/current.json`);
+  // A build id is immutable: its manifest is edge-cached for a year, so a different text under the same id would fail
+  // the pointer's sha256 check for readers. Re-running the same build is fine.
+  const published = await store.getJson(`${kind.prefix}/${manifest.buildId}/manifest.json`);
+  if (published && JSON.stringify(published) !== JSON.stringify(manifest)) throw new Error(`${kind.prefix} build ${manifest.buildId} is already published with a different manifest; build a new id`);
   if (live && live.buildId > manifest.buildId && !ROLLBACK) throw new Error(`live ${kind.prefix} build ${live.buildId} is newer than ${manifest.buildId}; ROLLBACK=1 to go back`);
   const listAll = async () => (await Promise.all(kind.folders.map((f) => store.list(`${kind.prefix}/${f}`)))).flat();
   const have = new Set((await listAll()).map((o) => o.key));
@@ -139,6 +145,7 @@ async function publishAddressed(store, holding, kind) {
     sha256: crypto.createHash('sha256').update(manifestText).digest('hex'), bytes: Buffer.byteLength(manifestText), ...(previous && { previous }) }),
   { type: 'application/json', cache: POINTER_CACHE });
   console.log(`live: ${kind.prefix} ${manifest.buildId}`);
+  await purgeEdge(`${kind.prefix}/current.json`);
   // The publication ledger: when each build became current, so retention counts from its actual replacement.
   const ledgerKey = `${kind.prefix}/published.json`;
   const ledger = (await store.getJson(ledgerKey))?.builds ?? (live && live.buildId !== manifest.buildId ? [{ buildId: live.buildId, at: null }] : []);
@@ -168,6 +175,24 @@ async function publishAddressed(store, holding, kind) {
     await store.remove([...oldManifests, ...sweep]);
   }
   console.log(`clean-up: kept ${keep.size} manifests, deleted ${oldManifests.length} manifests and ${sweep.length} objects`);
+}
+
+/**
+ * Drops the edge copies of a pointer just moved, so readers get the new build now instead of within ~10 minutes.
+ * Prefix purge: the .json cache rule keeps one entry per Origin. Best effort: a failure warns, the publish stands.
+ * Needs CLOUDFLARE_PURGE_TOKEN (Zone → Cache Purge); a folder store (STORE_DIR) never purges.
+ */
+async function purgeEdge(key) {
+  if (process.env.STORE_DIR) return;
+  const token = process.env.CLOUDFLARE_PURGE_TOKEN;
+  if (!token) { console.warn(`edge copy of ${key} not purged (no CLOUDFLARE_PURGE_TOKEN): readers see it within ~10 minutes`); return; }
+  try {
+    const res = await fetch(`https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/purge_cache`, { method: 'POST', signal: AbortSignal.timeout(15_000),
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ prefixes: [`${PUBLIC_HOST}/${key}`] }) });
+    const body = await res.json().catch(() => null);
+    if (res.ok && body?.success) console.log(`edge copy of ${key} purged`);
+    else console.warn(`edge purge of ${key} failed (${res.status}): ${JSON.stringify(body?.errors ?? null)}`);
+  } catch (e) { console.warn(`edge purge of ${key} failed: ${e.message}`); }
 }
 
 async function publishFuel(store, holding) {

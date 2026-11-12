@@ -106,3 +106,17 @@ test('retention counts from the actual replacement, not from a manifest that nev
   const ledger = JSON.parse(fs.readFileSync(path.join(store, 'roads/v2/published.json'), 'utf8')).builds.map((b) => b.buildId);
   assert.deepEqual(ledger, [d73, d1, d0]); // the never-published August build is not in the history
 });
+
+test('a build id is immutable: republishing it with a different manifest is refused, the same one is fine', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rat2-')), store = path.join(root, 'store');
+  const run = (work) => execFileSync('node', [PUBLISH], { env: { ...process.env, STORE_DIR: store, WORK: work, KIND: 'roads2' }, stdio: 'pipe' }).toString();
+  const d0 = id(0);
+  build(path.join(root, 'a'), d0, { '1_1': 'first' });
+  run(path.join(root, 'a'));
+  run(path.join(root, 'a')); // the same build again
+  build(path.join(root, 'b'), d0, { '1_1': 'changed' });
+  assert.throws(() => run(path.join(root, 'b')), /already published with a different manifest/);
+  const pointer = JSON.parse(fs.readFileSync(path.join(store, 'roads/v2/current.json'), 'utf8'));
+  const manifest = fs.readFileSync(path.join(store, `roads/v2/${d0}/manifest.json`), 'utf8');
+  assert.equal(pointer.sha256, crypto.createHash('sha256').update(manifest).digest('hex'), 'the live manifest is the first one');
+});
