@@ -29,7 +29,9 @@ import { execFileSync } from 'node:child_process';
 const WORK = process.env.WORK ?? new URL('.build', import.meta.url).pathname;
 const BUCKET = process.env.R2_BUCKET ?? 'routeall-roads';
 const TILE_CACHE = 'public, max-age=31536000, immutable'; // a build's tiles never change
-const POINTER_CACHE = 'public, max-age=300'; // a new build reaches the edge within 5 minutes
+const POINTER_CACHE = 'public, max-age=300'; // edge 300 s (Cloudflare .json cache rule) + browser 300 s: up to ~10 minutes, unless purgeEdge runs
+// tiles.routeall.app's zone. A pointer's edge copy is dropped right after it moves (purgeEdge).
+const PUBLIC_HOST = 'tiles.routeall.app', ZONE_ID = process.env.CLOUDFLARE_ZONE_ID ?? '48cb7d46a5211b37e32d3ac745a8c5a6';
 const PARALLEL = 24;
 const DAY = 86_400_000;
 const ROLLBACK = process.env.ROLLBACK === '1';
@@ -116,6 +118,10 @@ async function publishAddressed(store, holding, kind) {
   const manifestText = fs.readFileSync(kind.manifest(), 'utf8'), manifest = JSON.parse(manifestText);
   const objects = await kind.objects(manifest, async (o) => JSON.parse(fs.readFileSync(path.join(kind.dir(), kind.local(o)), 'utf8')));
   const live = await store.getJson(`${kind.prefix}/current.json`);
+  // A build id is immutable: its manifest is edge-cached for a year, so a different text under the same id would fail
+  // the pointer's sha256 check for readers. Re-running the same build is fine.
+  const published = (await store.get(`${kind.prefix}/${manifest.buildId}/manifest.json`))?.text;
+  if (published != null && published !== manifestText) throw new Error(`${kind.prefix} build ${manifest.buildId} is already published with a different manifest; build a new id`);
   if (live && live.buildId > manifest.buildId && !ROLLBACK) throw new Error(`live ${kind.prefix} build ${live.buildId} is newer than ${manifest.buildId}; ROLLBACK=1 to go back`);
   const listAll = async () => (await Promise.all(kind.folders.map((f) => store.list(`${kind.prefix}/${f}`)))).flat();
   const have = new Set((await listAll()).map((o) => o.key));
@@ -139,6 +145,7 @@ async function publishAddressed(store, holding, kind) {
     sha256: crypto.createHash('sha256').update(manifestText).digest('hex'), bytes: Buffer.byteLength(manifestText), ...(previous && { previous }) }),
   { type: 'application/json', cache: POINTER_CACHE });
   console.log(`live: ${kind.prefix} ${manifest.buildId}`);
+  await purgeEdge(`${kind.prefix}/current.json`);
   // The publication ledger: when each build became current, so retention counts from its actual replacement.
   const ledgerKey = `${kind.prefix}/published.json`;
   const ledger = (await store.getJson(ledgerKey))?.builds ?? (live && live.buildId !== manifest.buildId ? [{ buildId: live.buildId, at: null }] : []);
@@ -170,12 +177,33 @@ async function publishAddressed(store, holding, kind) {
   console.log(`clean-up: kept ${keep.size} manifests, deleted ${oldManifests.length} manifests and ${sweep.length} objects`);
 }
 
+/**
+ * Drops the edge copies of a pointer just moved, so readers get the new build now instead of within ~10 minutes.
+ * Prefix purge: the .json cache rule keeps one entry per Origin. Best effort: a failure warns, the publish stands.
+ * Every pointer (roads v1/v2, pois, boundaries, signals, names, fuel) is purged; one run moves one pointer, so one
+ * request per run (Free plan: 5 purge requests a minute). Needs CLOUDFLARE_PURGE_TOKEN (Zone → Cache Purge); a folder
+ * store (STORE_DIR) never purges.
+ */
+async function purgeEdge(key) {
+  if (process.env.STORE_DIR) return;
+  const token = process.env.CLOUDFLARE_PURGE_TOKEN;
+  if (!token) { console.warn(`edge copy of ${key} not purged (no CLOUDFLARE_PURGE_TOKEN): readers see it within ~10 minutes`); return; }
+  try {
+    const res = await fetch(`https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/purge_cache`, { method: 'POST', signal: AbortSignal.timeout(15_000),
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ prefixes: [`${PUBLIC_HOST}/${key}`] }) });
+    const body = await res.json().catch(() => null);
+    if (res.ok && body?.success) console.log(`edge copy of ${key} purged`);
+    else console.warn(`edge purge of ${key} failed (${res.status}): ${JSON.stringify(body?.errors ?? null)}`);
+  } catch (e) { console.warn(`edge purge of ${key} failed: ${e.message}`); }
+}
+
 async function publishFuel(store, holding) {
   const text = fs.readFileSync(path.join(WORK, 'fuel.json'), 'utf8');
   const live = await store.getJson('fuel/current.json');
   if (live?.weekOf > JSON.parse(text).weekOf && !ROLLBACK) throw new Error(`live fuel is for ${live.weekOf}, newer than ${JSON.parse(text).weekOf}; ROLLBACK=1 to go back`);
   await holding();
   await store.put('fuel/current.json', text, { cache: POINTER_CACHE });
+  await purgeEdge('fuel/current.json');
   console.log('live: fuel/current.json');
 }
 
@@ -214,6 +242,7 @@ async function publishNames(store, holding) {
   await store.put(`${prefix(build.buildId)}build.json`, JSON.stringify({ ...build, ...(previous && { previous }) }), { cache: TILE_CACHE });
   await holding();
   await store.put('names/current.json', JSON.stringify({ version: build.buildId, path: `names/v1/${build.buildId}`, states: build.states }), { cache: POINTER_CACHE });
+  await purgeEdge('names/current.json');
   console.log(`live: road names ${build.buildId}`);
   const ids = [...new Set((await store.list('names/v1/')).map((o) => o.key.match(/^names\/v1\/(\d{8}T\d{6}Z)\//)?.[1]).filter(Boolean))].sort();
   const retire = ids.filter((id, i) => id !== build.buildId && id !== previous && ids[i + 1] && Date.now() - stampOf(ids[i + 1]) > DAY);
@@ -258,6 +287,7 @@ async function publishSignals(store, holding) {
   await store.put(`${prefix(build.buildId)}build.json`, JSON.stringify({ ...build, ...(previous && { previous }) }), { cache: TILE_CACHE });
   await holding();
   await store.put('signals/current.json', JSON.stringify({ version: build.buildId, deg: build.deg, path: `signals/v1/${build.buildId}` }), { cache: POINTER_CACHE });
+  await purgeEdge('signals/current.json');
   console.log(`live: signals ${build.buildId}`);
   const ids = [...new Set((await store.list('signals/v1/')).map((o) => o.key.match(/^signals\/v1\/(\d{8}T\d{6}Z)\//)?.[1]).filter(Boolean))].sort();
   const retire = ids.filter((id, i) => id !== build.buildId && id !== previous && ids[i + 1] && Date.now() - stampOf(ids[i + 1]) > DAY);
@@ -305,6 +335,7 @@ async function publishBuild(store, holding) {
   await store.put(`${KIND}/${build.buildId}/build.json`, fs.readFileSync(metaFile), { cache: TILE_CACHE });
   await holding();
   await store.put(`${KIND}/current.json`, JSON.stringify({ ...build, ...(previous && { previous }) }), { cache: POINTER_CACHE });
+  await purgeEdge(`${KIND}/current.json`);
   console.log(`live: ${build.buildId}`);
 
   // Clean-up, in the same lock. A build id is its build time, so the build after X in id order
@@ -399,6 +430,7 @@ const r2 = process.env.WRANGLER ? wrangler() : rest();
 if (process.env.KIND === 'fuel') {
   await r2.put('fuel/current.json', path.join(WORK, 'fuel.json'), 'application/json', POINTER_CACHE);
   console.log('live: fuel/current.json');
+  await purgeEdge('fuel/current.json');
   process.exit(0);
 }
 // KIND=pois publishes the place tiles (pois.mjs) under their own pointer, so a places build can
@@ -435,6 +467,7 @@ fs.writeFileSync(pointer, JSON.stringify({ ...build, ...(previous && { previous 
 await r2.put(`${KIND}/${build.buildId}/build.json`, path.join(WORK, PLACES ? 'pois.json' : 'build.json'), 'application/json', TILE_CACHE);
 await r2.put(`${KIND}/current.json`, pointer, 'application/json', POINTER_CACHE);
 console.log(`live: ${build.buildId}`);
+await purgeEdge(`${KIND}/current.json`);
 
 const retire = live?.buildId === build.buildId ? null : live?.previous;
 if (retire && retire !== build.buildId && retire !== previous) {
