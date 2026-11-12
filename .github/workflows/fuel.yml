@@ -55,6 +55,7 @@ jobs:
           R2_S3_ENDPOINT: ${{ secrets.R2_S3_ENDPOINT }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_PURGE_TOKEN }}
         run: KIND=fuel node publish.mjs
 
       # The query string skips the edge cache, so this reads what R2 now holds.

@@ -116,6 +116,9 @@ test('a build id is immutable: republishing it with a different manifest is refu
   run(path.join(root, 'a')); // the same build again
   build(path.join(root, 'b'), d0, { '1_1': 'changed' });
   assert.throws(() => run(path.join(root, 'b')), /already published with a different manifest/);
+  const m = path.join(root, 'a', 'manifest2.json'); // same JSON, different bytes: the pointer's sha256 would disagree
+  fs.writeFileSync(m, JSON.stringify(JSON.parse(fs.readFileSync(m, 'utf8')), null, 2));
+  assert.throws(() => run(path.join(root, 'a')), /already published with a different manifest/);
   const pointer = JSON.parse(fs.readFileSync(path.join(store, 'roads/v2/current.json'), 'utf8'));
   const manifest = fs.readFileSync(path.join(store, `roads/v2/${d0}/manifest.json`), 'utf8');
   assert.equal(pointer.sha256, crypto.createHash('sha256').update(manifest).digest('hex'), 'the live manifest is the first one');
