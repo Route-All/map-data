@@ -8,8 +8,9 @@ Why (owner, 2026-11-08): permits print numbers ("IH-635", "SL-8 NFR", "SH-161 WF
 ("Lyndon B Johnson Freeway", "North Sam Houston Parkway East", a frontage road called "North Service Road"). The app reads these files to
 tie the two, only next to pavement that carries both (GRID squares).
 
-  names:    UPPERCASE name -> ref -> grid squares where a way carries both (ways with ref + name / alt_name / official_name / old_name /
-            loc_name; road relations' ref over their member ways' names; unsigned_ref, as "SR <n>").
+  names:    UPPERCASE name -> ref -> grid squares where a way carries both (ways with ref + any NAME_KEYS tag; road relations' ref over
+            their member ways' names AND the relation's own names, e.g. "Pennsylvania Turnpike" / "Bob Bullock Loop", over every member
+            way; unsigned_ref, as "SR <n>").
   frontage: ref -> UPPERCASE names of non-freeway ways beside that ref's main lanes (~150 m, roughly parallel), named Frontage / Service
             Road, with a main-lane name, or carrying the ref themselves.
   unsigned: ref -> names, for refs that exist only as unsigned_ref.
@@ -31,6 +32,17 @@ FAST = re.compile(r'^(motorway|trunk)(_link)?$')
 MAIN = re.compile(r'^(motorway|trunk)$')
 FRONTAGE_WORDS = re.compile(r'\b(frontage|service\s+(road|rd))\b', re.I)
 CELL = 0.0015  # ~150 m
+# Every tag a road's name is kept in. v1 read the first five; the rest (TIGER's name_1 / name_2, reg_name, short_name, name:en ...) and a
+# relation's own names are v2, and from those a name that only restates a designation ("STATE ROUTE 103", "NH RT 140", "I 95 (MA)") is left
+# out: the app parses those itself, and TIGER's name_1 often names ANOTHER route on the same pavement.
+V1_KEYS = ('name', 'alt_name', 'official_name', 'old_name', 'loc_name')
+NAME_KEYS = V1_KEYS + ('reg_name', 'nat_name', 'short_name', 'int_name', 'name:en', 'name_1', 'name_2')
+_ST = '|'.join(sorted({k.replace('-', ' ').upper() for k in ABBR} | set(ABBR.values()), key=len, reverse=True))
+_DIR = r'NORTH|SOUTH|EAST|WEST|NORTHBOUND|SOUTHBOUND|EASTBOUND|WESTBOUND|[NSEW]B?'
+DESIGNATION = re.compile(rf'(?:(?:{_DIR}|OLD) )?(?:(?:{_ST}|STATE|US|U\.?S\.?|UNITED STATES|INTERSTATE|IH|I|COUNTY|CNTY|PARISH|HIGHWAY|HWY|ROUTE|RTE|RT|ROAD|RD'
+                         rf'|FM|RM|FARM[ -]TO[ -]MARKET|RANCH[ -]TO[ -]MARKET|FARM|RANCH|LOOP|SPUR|BUSINESS|BUS|SR|SH|CR|TOWNSHIP|TWP|NO\.?)[ .-]*)+\d+[A-Z]?(?:-?[A-Z])?'
+                         rf'(?: (?:{_DIR}|BUSINESS|BUS|BYPASS|BYP|TRUCK|ALT|ALTERNATE|SPUR|LOOP|CONNECTOR))*(?: ?\((?:{_DIR}|[A-Z] - [^)]*|[^)]*\b(?:{_ST}|CLOCKWISE|COUNTERCLOCKWISE|FORMER|OLD|BUS|BUSINESS|TRUCK|ALT)\b[^)]*)\)?)?')
+# ^ a parenthetical that only says where / which one ("(MA)", "(B - PECOS, TX)", "(CLOCKWISE)"); "LOOP 1 (MOPAC)" names the road, so it stays.
 
 def tags_of(field):
     out = {}
@@ -85,6 +97,9 @@ def cells_of(coords):
             for k in range(1, n):
                 out.add(f'{math.floor((py + (y - py) * k / n) * GRID)}:{math.floor((px + (x - px) * k / n) * GRID)}')
     return out
+def names_of(t, kept=V1_KEYS):
+    # The `kept` tags as they are (v1's, so nothing v1 had is lost); the others without the bare designations.
+    return [n for k in NAME_KEYS for n in (t.get(k) or '').split(';') if k in kept or not DESIGNATION.fullmatch(n.strip().upper())]
 def add_name(n, ref, coords):
     n = (n or '').strip().upper()
     if re.fullmatch(r'\d+[A-Z]?', ref or ''):
@@ -95,9 +110,8 @@ def add_name(n, ref, coords):
 for t, coords in ways.values():
     rs = refs_of(t)
     for r in rs:
-        for key in ('name', 'alt_name', 'official_name', 'old_name', 'loc_name'):
-            for n in (t.get(key) or '').split(';'):
-                add_name(n, r, coords)
+        for n in names_of(t):
+            add_name(n, r, coords)
     for u in (t.get('unsigned_ref') or '').split(';'):
         u = u.strip()
         if re.fullmatch(r'\d+[A-Z]?', u):
@@ -109,11 +123,7 @@ for t, coords in ways.values():
                     if n.strip():
                         unsigned[u].add(n.strip().upper())
 
-for t, members in relations:
-    ref = (t.get('ref') or '').strip()
-    net = t.get('network') or ''
-    if not ref:
-        continue
+def relation_ref(ref, net):
     # A relation's ref is bare in some networks ("8" in US:TX:Loop): give it its network's word.
     if re.fullmatch(r'\d+[A-Z]?', ref):
         last = net.split(':')[-1]
@@ -121,14 +131,22 @@ for t, members in relations:
         if not word and re.fullmatch(r'[A-Z]{2}', last) and net.startswith('US:'):
             word = last  # a state network: US:TX -> "TX 161"
         if not word:
-            continue  # a bare number with no network word would match any road with that number
+            return None  # a bare number with no network word would match any road with that number
         ref = f'{word} {ref}'
-    for wid in members:
-        w = ways.get(wid)
-        if w:
-            for key in ('name', 'alt_name', 'official_name'):
-                for n in (w[0].get(key) or '').split(';'):
-                    add_name(n, ref, w[1])
+    return ref
+
+for t, members in relations:
+    rs = [r for r in (relation_ref(r, t.get('network') or '') for r in refs_of(t)) if r]
+    member_ways = [ways[wid] for wid in members if wid in ways]
+    for ref in rs:
+        # The member ways' names carry the relation's ref even when a way's own ref differs (a concurrency, a ref left off the way).
+        for wt, coords in member_ways:
+            for n in names_of(wt):
+                add_name(n, ref, coords)
+        # The relation's own names ("Pennsylvania Turnpike" on I 76, "Bob Bullock Loop" on US:TX:Loop 20) over every member way.
+        for n in names_of(t, kept=()):
+            for _, coords in member_ways:
+                add_name(n, ref, coords)
 
 # Frontage: non-freeway ways beside a ref's main lanes.
 grid = defaultdict(list)  # cell -> [(ref, bearing)]

@@ -21,6 +21,12 @@ const OPL = [
   way(5, { highway: 'motorway', ref: 'I 20', name: 'Interstate 20' }, line(-97.00, -96.90, 32.50)),
   way(6, { highway: 'primary', name: 'I 20 Frontage Road' }, line(-97.00, -96.90, 32.5005)),
   way(7, { highway: 'primary', name: 'Mockingbird Lane' }, line(-97.00, -96.90, 32.60)),
+  // v2: a relation's own names over every member way, whatever the way's own ref; TIGER name_1 / short_name; designations left out.
+  way(8, { highway: 'trunk', ref: 'US 59', name: 'Saunders Street' }, line(-99.50, -99.45, 27.55)),
+  way(9, { highway: 'primary', ref: 'I 35;US 77', name: 'North Interregional Highway', name_1: 'State Highway 9', short_name: 'IH Access' }, line(-97.70, -97.69, 30.30)),
+  way(10, { highway: 'motorway', ref: 'I 76', name: 'Mainline' }, line(-77.00, -76.95, 40.20)),
+  rel(3, { type: 'route', route: 'road', network: 'US:TX:Loop', ref: '20', name: 'Bob Bullock Loop', alt_name: 'Loop 1 (MoPac)', official_name: 'US 59 (TX)' }, [8]),
+  rel(4, { type: 'route', route: 'road', network: 'US:I', ref: 'I 76', name: 'Pennsylvania Turnpike' }, [10]),
   rel(1, { type: 'route', route: 'road', network: 'US:TX:Loop', ref: '8' }, [2]),
   rel(2, { type: 'route', route: 'road', network: 'XX:Unknown', ref: '44' }, [3]),
 ].join('\n') + '\n';
@@ -39,6 +45,15 @@ test('names: refs by name, relation refs with their network word, unsigned SR nu
   assert.deepEqual(Object.keys(idx.names['CENTER HILL ROAD']), ['SR 1002']);
   assert.ok(idx.frontage['I 20']['I 20 FRONTAGE ROAD']);
   assert.equal(idx.frontage['I 20']['MOCKINGBIRD LANE'], undefined); // 11 km away
+  assert.deepEqual(Object.keys(idx.names['BOB BULLOCK LOOP']), ['Loop 20']); // the relation's name, on a way that carries US 59 itself
+  assert.ok(decode(idx.names['BOB BULLOCK LOOP']['Loop 20']).includes('2755:-9950'));
+  assert.deepEqual(Object.keys(idx.names['SAUNDERS STREET']), ['Loop 20', 'US 59']);
+  assert.deepEqual(Object.keys(idx.names['LOOP 1 (MOPAC)']), ['Loop 20']); // a designation with a name in it is kept
+  assert.equal(idx.names['US 59 (TX)'], undefined); // a bare designation is not
+  assert.deepEqual(Object.keys(idx.names['PENNSYLVANIA TURNPIKE']), ['I 76']);
+  assert.deepEqual(Object.keys(idx.names['NORTH INTERREGIONAL HIGHWAY']), ['I 35', 'US 77']); // "I 35;US 77": both
+  assert.deepEqual(Object.keys(idx.names['IH ACCESS']), ['I 35', 'US 77']);
+  assert.equal(idx.names['STATE HIGHWAY 9'], undefined); // TIGER's name_1 naming a number is left to the app's parser
   // gzip with mtime 0: the same input builds byte-identical files, so publish copies an unchanged state.
   const again = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
   execFileSync('python3', [path.join(DIR, 'names.py'), 'texas', again], { input: OPL });
