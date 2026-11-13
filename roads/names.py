@@ -39,10 +39,14 @@ V1_KEYS = ('name', 'alt_name', 'official_name', 'old_name', 'loc_name')
 NAME_KEYS = V1_KEYS + ('reg_name', 'nat_name', 'short_name', 'int_name', 'name:en', 'name_1', 'name_2')
 _ST = '|'.join(sorted({k.replace('-', ' ').upper() for k in ABBR} | set(ABBR.values()), key=len, reverse=True))
 _DIR = r'NORTH|SOUTH|EAST|WEST|NORTHBOUND|SOUTHBOUND|EASTBOUND|WESTBOUND|[NSEW]B?'
-DESIGNATION = re.compile(rf'(?:(?:{_DIR}|OLD) )?(?:(?:{_ST}|STATE|US|U\.?S\.?|UNITED STATES|INTERSTATE|IH|I|COUNTY|CNTY|PARISH|HIGHWAY|HWY|ROUTE|RTE|RT|ROAD|RD'
-                         rf'|FM|RM|FARM[ -]TO[ -]MARKET|RANCH[ -]TO[ -]MARKET|FARM|RANCH|LOOP|SPUR|BUSINESS|BUS|SR|SH|CR|TOWNSHIP|TWP|NO\.?)[ .-]*)+\d+[A-Z]?(?:-?[A-Z])?'
-                         rf'(?: (?:{_DIR}|BUSINESS|BUS|BYPASS|BYP|TRUCK|ALT|ALTERNATE|SPUR|LOOP|CONNECTOR))*(?: ?\((?:{_DIR}|[A-Z] - [^)]*|[^)]*\b(?:{_ST}|CLOCKWISE|COUNTERCLOCKWISE|FORMER|OLD|BUS|BUSINESS|TRUCK|ALT)\b[^)]*)\)?)?')
-# ^ a parenthetical that only says where / which one ("(MA)", "(B - PECOS, TX)", "(CLOCKWISE)"); "LOOP 1 (MOPAC)" names the road, so it stays.
+# A designation starts with a network's word (the app's national audit uses the same words) and has a number in it ...
+_DESIG = re.compile(rf'(?:(?:{_DIR}|OLD) )?(?:(?:{_ST}) )?(?:(?:{_ST})[ -]?\d|I[ -]?\d|(?:INTERSTATE|IH|US|U\.S\.|UNITED STATES|STATE|COUNTY|CNTY|PARISH'
+                    rf'|HIGHWAY|HWY|ROUTE|RTE|RT|FM|RM|FARM|RANCH|URBAN|LOOP|SPUR|BUSINESS|FOREST|NATIONAL FOREST|TOWNSHIP|TWP|BIA|BUREAU|INDIAN'
+                    rf'|PARK ROAD|TRUNK|CR|SR|SH|STH|CTH|FR|FSR|NF)\b).*\d')
+# ... and any parenthetical only says where / which one ("(MA)", "(B - PECOS, TX)", "(CLOCKWISE)"). "LOOP 1 (MOPAC)" names the road: kept.
+_WHERE = re.compile(rf'(?:{_DIR})|[A-Z] - .*|(?:.*, )?(?:{_ST})|.*\b(?:CLOCKWISE|COUNTERCLOCKWISE|FORMER|OLD|BUS|BUSINESS|TRUCK|ALT|SCENIC)\b.*')
+def is_designation(n):
+    return bool(_DESIG.match(n)) and all(_WHERE.fullmatch(p.strip()) for p in re.findall(r'\(([^)]*)\)?', n))
 
 def tags_of(field):
     out = {}
@@ -99,7 +103,7 @@ def cells_of(coords):
     return out
 def names_of(t, kept=V1_KEYS):
     # The `kept` tags as they are (v1's, so nothing v1 had is lost); the others without the bare designations.
-    return [n for k in NAME_KEYS for n in (t.get(k) or '').split(';') if k in kept or not DESIGNATION.fullmatch(n.strip().upper())]
+    return [n for k in NAME_KEYS for n in (t.get(k) or '').split(';') if k in kept or not is_designation(n.strip().upper())]
 def add_name(n, ref, coords):
     n = (n or '').strip().upper()
     if re.fullmatch(r'\d+[A-Z]?', ref or ''):
