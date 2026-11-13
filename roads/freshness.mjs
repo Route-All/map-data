@@ -40,7 +40,11 @@ await check('events', async () => {
     if (!f.lastValidatedAt) console.log(`SKIP events/${id}: has never answered (${f.error ?? f.status})`);
     else if (age(f.lastValidatedAt) > 24) alerts.push(`events/${id}: last checked ${age(f.lastValidatedAt).toFixed(1)} h ago (${f.error ?? f.status})`);
     const before = previous?.feeds?.[id]?.total;
-    if (before >= 20 && (f.total ?? 0) < before / 2) alerts.push(`events/${id}: ${f.total ?? 0} rows, down from ${before}`);
+    // Only a collapse is an alert: a feed that drops to a tenth or less of its last count has broken (a parser or
+    // a source change). A halving is normal: states post daytime lane closures and lift them in the evening
+    // (Louisiana 27 -> 12 -> 6 every evening, 2026-11-11 and -12). Only the previous hour's manifest is kept, so
+    // there is no same-hour-yesterday to compare against.
+    if (before >= 20 && (f.total ?? 0) <= before / 10) alerts.push(`events/${id}: ${f.total ?? 0} rows, down from ${before}`);
   }
 });
 await check('roads', async () => {
