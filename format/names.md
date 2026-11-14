@@ -19,6 +19,11 @@ file whose size or SHA-256 differs from the pointer.
 - `grid`: grid squares per degree (100, about 1.1 km). A name counts as a route only in a square (or its 8 neighbours) where
   OSM pavement carries both.
 - `names[NAME][ref]`: squares where the UPPERCASE name carries the ref ("I 635", "TX 161", "Loop 8", "SR 1002").
+  Names come from a way's `name`, `alt_name`, `official_name`, `old_name`, `loc_name`, `reg_name`, `nat_name`, `short_name`,
+  `int_name`, `name:en`, `name_1`, `name_2`, and from a road route relation's own names over every member way ("Pennsylvania
+  Turnpike" → "I 76", "Bob Bullock Loop" → "Loop 20"). Keys are exact UPPERCASE names; the app normalizes on lookup. A name that
+  is only a designation ("LOOP 335", and from the tags added in v2 also "STATE ROUTE 103", "I 95 (MA)") is not a key: the app
+  parses those itself.
 - `frontage[ref][NAME]`: squares where a non-freeway road beside that ref's main lanes has that name.
 - `unsigned[ref]`: names of refs that exist only as `unsigned_ref`.
 
