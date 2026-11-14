@@ -78,17 +78,44 @@ def refs_of(t):
 # Only a value shaped like one ref: OSM also keeps histories there ("FM 157 (old Loop 496 (old US 287))", "US-12, US-191"), which no permit prints.
 OTHER_REF_KEYS = ('old_ref', 'fut_ref', 'official_ref', 'unsigned_ref')
 ONE_REF = re.compile(r'[A-Za-z]{1,6}[ -]?\d+[A-Za-z]?(?: (?:Business|Bus|Bypass|Byp|Alternate|Alt|Truck|Spur|Loop|Connector|Toll))?')
-def other_refs(t, keys=OTHER_REF_KEYS):
+def other_refs(t, keys=OTHER_REF_KEYS, business=False):
     out = []
     for k in keys:
         for r in (t.get(k) or '').split(';'):
             r = r.strip()
             if k == 'unsigned_ref' and re.fullmatch(r'\d+[A-Z]?', r):
+                if business:
+                    continue  # a business route's bare unsigned number is its hidden state number, not "SR 96E"
                 r = f'SR {r}'  # as the unsigned names below
             if ONE_REF.fullmatch(r):
                 out.append(r)
     return out
 norm = lambda r: re.sub(r'[\s-]+', '', r.upper())  # "I-69" and "I 69" are one ref
+def number(r):
+    m = re.search(r'\d+[A-Z]?', r.upper())
+    return m.group() if m else None
+# One road whatever the network's spelling: "OH 121" is "SR 121", "M 13" "MI 13", "US 1 Alt" "US 1 Alternate".
+same_ref = lambda a, b: norm(a) == norm(b) or (number(a) is not None and number(a) == number(b))
+# A network's rank: Interstate 4, US 3, state 2, anything else (FM, county, loop, business, truck ...) 1.
+LOW_NET = {'CR', 'FM', 'RM', 'PR', 'CH', 'TR', 'TH', 'FR', 'NF', 'FS', 'FH', 'BL', 'BS', 'BI', 'BU'}
+def rank(r):
+    u = r.upper()
+    if re.search(r'\b(?:BUSINESS|BUS|ALT|ALTERNATE|TRUCK|SPUR|LOOP|BYPASS|BYP|CONNECTOR|TOLL)\b', u):
+        return 1
+    m = re.match(r'([A-Z]+)[ -]?\d', u)
+    p = m.group(1) if m else ''
+    if p in ('I', 'IH'):
+        return 4
+    if p == 'US':
+        return 3
+    if p not in LOW_NET and (p in ABBR.values() or p in ('SR', 'SH', 'STH', 'K', 'M', 'N')):
+        return 2
+    return 1
+def old_targets(x, refs):
+    # An old_ref beside a lower network is the old alignment the route left (ref AR 367, old_ref US 67, while US 67 runs nearby): tying the
+    # live number to it would read the lower road as the route. Only the refs no lower than the old one take it (I 42 old US 70, I 84 old
+    # I 80N, US 491 old US 666; of "US 67B;AR 367", US 67B). On a freeway too: Milwaukee's WI 175 freeway is old US 41, and US 41 is not there.
+    return [r for r in refs if rank(r) >= rank(x)]
 
 ways = {}          # id -> (tags, coords)
 relations = []     # (tags, member way ids)
@@ -136,8 +163,11 @@ def add_name(n, ref, coords):
     if n and ref and not re.fullmatch(r'[A-Z]{0,4}\s*\d+[A-Z]?', n):  # a name, not a bare number
         names[n][ref] |= cells_of(coords)
 def add_alias(printed, on, coords):
-    # A bare number names no network on either side ("70" is US 70, NC 70 or SR 70): left out, as in add_name.
-    if norm(printed) != norm(on) and not re.fullmatch(r'\d+[A-Z]?', printed) and not re.fullmatch(r'\d+[A-Z]?', on):
+    # Both sides shaped like one ref with its network ("I 42", "US 70", "Loop 8"): a bare number ("70"), bare letters ("A", "E") or a network
+    # id ("US:AL:Autauga") names no road. A side that is the other without its prefix ("CTH A" / "A", "CR A1" / "A1") is no second number.
+    a, b = norm(printed), norm(on)
+    if a != b and ONE_REF.fullmatch(printed) and ONE_REF.fullmatch(on) and not re.fullmatch(r'\d+[A-Z]?', printed) \
+            and not re.fullmatch(r'\d+[A-Z]?', on) and not a.endswith(b) and not b.endswith(a):
         aliases[printed][on] |= cells_of(coords)
 
 for t, coords in ways.values():
@@ -147,13 +177,15 @@ for t, coords in ways.values():
             add_name(n, r, coords)
     # Only beside a current ref: a way with an old_ref and no ref is the old alignment, no longer that route; one with only a fut_ref is not
     # built yet. unsigned_ref's names are read below, as before.
+    olds = other_refs(t, ('old_ref',))
     for x in other_refs(t) if rs else ():
-        if any(norm(x) == norm(r) for r in rs):
+        on = old_targets(x, rs) if x in olds else rs
+        if any(same_ref(x, r) for r in rs) or not on:
             continue
         if x not in other_refs(t, ('unsigned_ref',)):
             for n in names_of(t):
                 add_name(n, x, coords)
-        for r in rs:
+        for r in on:
             add_alias(x, r, coords)
     for u in (t.get('unsigned_ref') or '').split(';'):
         u = u.strip()
@@ -169,6 +201,10 @@ for t, coords in ways.values():
 def relation_ref(ref, net):
     # A relation's ref is bare in some networks ("8" in US:TX:Loop): give it its network's word.
     if re.fullmatch(r'\d+[A-Z]?', ref):
+        # An Interstate's or US route's business route is that route's: "I 75 Business", never "Loop 75" (US:I:Business:Loop).
+        biz = re.match(r'US:(I|US):Business', net)
+        if biz:
+            return f'{biz.group(1)} {ref} Business'
         last = net.split(':')[-1]
         word = {'Loop': 'Loop', 'Spur': 'Spur', 'FM': 'FM', 'RM': 'RM', 'Business': 'Business', 'Beltway': 'Loop', 'I': 'I', 'US': 'US'}.get(last)
         if not word and re.fullmatch(r'[A-Z]{2}', last) and net.startswith('US:'):
@@ -186,19 +222,24 @@ for t, members in relations:
     for ref in rs:
         for wt, coords in member_ways:
             wr = refs_of(wt)
-            if not any(norm(ref) == norm(w) for w in wr):
+            if not any(same_ref(ref, w) for w in wr):
                 for w in wr:
                     add_alias(ref, w, coords)
     # The relation's old / future / official / unsigned numbers: its member ways' names, its own names, its own refs.
     # As on ways: only beside a current ref, and unsigned_ref ties refs only (its names are read from the ways).
-    xs = [x for x in (relation_ref(x, net) for x in other_refs(t)) if x and not any(norm(x) == norm(r) for r in rs)] if rs else []
-    unsigned_xs = {relation_ref(x, net) for x in other_refs(t, ('unsigned_ref',))}
+    biz = 'Business' in net
+    xs = [x for x in (relation_ref(x, net) for x in other_refs(t, business=biz)) if x and not any(same_ref(x, r) for r in rs)] if rs else []
+    unsigned_xs = {relation_ref(x, net) for x in other_refs(t, ('unsigned_ref',), business=biz)}
+    olds = {relation_ref(x, net) for x in other_refs(t, ('old_ref',))}
     for x in xs:
         for wt, coords in member_ways:
+            on = old_targets(x, rs) if x in olds else rs
+            if not on:
+                continue
             if x not in unsigned_xs:
                 for n in names_of(wt) + names_of(t, kept=()):
                     add_name(n, x, coords)
-            for r in rs:
+            for r in on:
                 add_alias(x, r, coords)
     for ref in rs:
         # The member ways' names carry the relation's ref even when a way's own ref differs (a concurrency, a ref left off the way).

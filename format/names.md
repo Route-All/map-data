@@ -31,8 +31,12 @@ file whose size or SHA-256 differs from the pointer.
   one is read on pavement labelled the other. Sources: a way's or route relation's `old_ref` / `fut_ref` / `official_ref` /
   `unsigned_ref` against its `ref` (NC's Clayton Bypass: `"US 70": { "I 42": … }`; I-69 at Cleveland, TX: `"I 69": { "US 59": … }`),
   and a route relation's ref against a member way's own refs when the way's `ref` lacks it (a concurrency mapped only on the
-  relation, named or unnamed). Refs as OSM writes them; a bare number on either side is left out. The app reads the pairs both
-  ways (services/roadNames.ts `refAliases`), only in a square (or its 8 neighbours) listed here.
+  relation, named or unnamed: a way whose ref has the relation's number under another spelling, "SR 121" for "OH 121", carries it).
+  An `old_ref` counts only for the way's refs of no lower a network (Interstate, US, state, then the rest): "AR 367" with old_ref
+  "US 67" is the old alignment, not US 67; "I 42" with old_ref "US 70" is US 70 renumbered. Refs as OSM writes them, and both sides must be one ref with
+  its network ("I 42", "US 70", "Loop 8", "I 75 Business"): a bare number ("70"), bare letters ("A"), a network id, or a side that is
+  the other without its prefix ("CTH A" / "A") is left out. The app reads the pairs both ways (services/roadNames.ts `refAliases`),
+  only in a square (or its 8 neighbours) listed here.
 
 Squares are one string per entry, sorted, as small steps: the first square `lat,lng`, then `dlat,dlng`, or `dlng` alone on
 the same row (`"3292,-9680 1 1 1,-2"` = 3292:-9680, 3292:-9679, 3292:-9678, 3293:-9680).

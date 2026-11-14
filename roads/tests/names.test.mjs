@@ -116,3 +116,50 @@ test('names: a lettered or single-digit designation in TIGER name_1 is not tied 
   assert.ok(out.names['MAIN STREET']?.['WI 21'], 'the way name is still tied');
   for (const n of ['COUNTY ROAD F', 'U.S. ROUTE 9', 'I-5 (BUS)']) assert.equal(out.names[n], undefined, `${n} must not be indexed`);
 });
+
+test('names v3 aliases: old alignments, spelling, network shapes, business routes (Fable review, PR #24)', () => {
+  const opl = [
+    // An old alignment beside a lower network: AR 367 is old US 67, and US 67 still runs nearby. No tie either way.
+    way(1, { highway: 'primary', ref: 'AR 367', old_ref: 'US 67', name: 'Old Highway Road' }, line(-92.00, -91.95, 35.005)),
+    // A freeway that became a state route is not its old US route (WI 175, old US 41).
+    way(11, { highway: 'motorway', ref: 'WI 175', old_ref: 'US 41', name: 'Stadium Freeway' }, line(-87.95, -87.90, 43.005)),
+    // An Interstate keeps its old number (I 42 / US 70), as does a US route renumbered as a US route.
+    way(2, { highway: 'motorway', ref: 'I 42', old_ref: 'US 70', name: 'Clayton Bypass' }, line(-78.45, -78.40, 35.625)),
+    way(3, { highway: 'primary', ref: 'US 491', old_ref: 'US 666', name: 'Devils Highway' }, line(-108.80, -108.75, 36.505)),
+    // The relation's ref spelled otherwise on the way (OH 121 / SR 121): carried, so no alias, and nothing dragged in (SR 49).
+    way(4, { highway: 'primary', ref: 'SR 121;SR 49' }, line(-84.50, -84.45, 40.005)),
+    rel(1, { type: 'route', route: 'road', network: 'US:OH', ref: '121' }, [4]),
+    // A printed key with no network ("A" over "CTH A"; a county network id) is no ref.
+    way(5, { highway: 'secondary', ref: 'CTH A' }, line(-89.40, -89.35, 43.005)),
+    rel(2, { type: 'route', route: 'road', network: 'US:WI:Dane', ref: 'A' }, [5]),
+    // An Interstate business loop is "I 75 Business", not "Loop 75"; a business route's bare unsigned_ref is no "SR 96E".
+    way(6, { highway: 'primary', ref: 'US 224' }, line(-83.70, -83.65, 41.005)),
+    rel(3, { type: 'route', route: 'road', network: 'US:I:Business:Loop', ref: '75', unsigned_ref: '96E' }, [6]),
+    // A relation's old_ref goes the same way as a way's: kept on a freeway member, dropped beside a lower network.
+    way(7, { highway: 'motorway', ref: 'I 42' }, line(-78.40, -78.35, 35.625)),
+    rel(4, { type: 'route', route: 'road', network: 'US:I', ref: '42', old_ref: 'US 70' }, [7]),
+    way(8, { highway: 'primary', ref: 'AR 367' }, line(-91.95, -91.90, 35.005)),
+    rel(5, { type: 'route', route: 'road', network: 'US:AR', ref: '367', old_ref: 'US 67' }, [8]),
+    // Of "US 67B;AR 367" with old_ref US 67, only US 67B takes it.
+    way(10, { highway: 'primary', ref: 'US 67B;AR 367', old_ref: 'US 67' }, line(-91.90, -91.85, 35.005)),
+    // A hidden state number on a way (TN's US 41 is SR 2): an alias.
+    way(9, { highway: 'primary', ref: 'US 41', unsigned_ref: '2' }, line(-86.80, -86.75, 36.105)),
+  ].join('\n') + '\n';
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
+  execFileSync('python3', [path.join(DIR, 'names.py'), 'texas', work], { input: opl });
+  const idx = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'TX.json.gz'))));
+  assert.deepEqual(Object.keys(idx.aliases['US 67']), ['US 67B']);
+  assert.deepEqual(Object.keys(idx.names['OLD HIGHWAY ROAD']), ['AR 367']);
+  assert.deepEqual(Object.keys(idx.names['CLAYTON BYPASS']), ['I 42', 'US 70']);
+  assert.deepEqual(Object.keys(idx.aliases['US 70']), ['I 42']);
+  assert.ok(decode(idx.aliases['US 70']['I 42']).includes('3562:-7837')); // way 7, through relation 4's old_ref
+  assert.deepEqual(Object.keys(idx.aliases['US 666']), ['US 491']);
+  assert.deepEqual(Object.keys(idx.names['STADIUM FREEWAY']), ['WI 175']);
+  assert.equal(idx.aliases['OH 121'], undefined);
+  assert.equal(idx.aliases.A, undefined);
+  assert.deepEqual(Object.keys(idx.aliases['I 75 Business']), ['US 224']);
+  assert.equal(idx.aliases['Loop 75'], undefined);
+  assert.equal(idx.aliases['SR 96E'], undefined);
+  assert.deepEqual(Object.keys(idx.aliases['SR 2']), ['US 41']);
+  assert.deepEqual(Object.keys(idx.aliases).sort(), ['I 75 Business', 'SR 2', 'US 666', 'US 67', 'US 70']);
+});
