@@ -25,6 +25,13 @@ const OPL = [
   way(8, { highway: 'trunk', ref: 'US 59', name: 'Saunders Street' }, line(-99.50, -99.45, 27.55)),
   way(9, { highway: 'primary', ref: 'I 35;US 77', name: 'North Interregional Highway', name_1: 'State Highway 9', short_name: 'IH Access' }, line(-97.70, -97.69, 30.30)),
   way(10, { highway: 'motorway', ref: 'I 76', name: 'Mainline' }, line(-77.00, -76.95, 40.20)),
+  // v3: renumbered roads and a concurrency kept only on the relation.
+  way(11, { highway: 'motorway', ref: 'I 42', old_ref: 'US 70', name: 'Clayton Bypass' }, line(-78.45, -78.40, 35.625)),
+  way(12, { highway: 'motorway', ref: 'US 59', fut_ref: 'I 69' }, line(-95.10, -95.05, 30.345)),
+  way(13, { highway: 'motorway', ref: 'US 59' }, line(-95.05, -95.00, 30.345)),
+  way(14, { highway: 'motorway', ref: 'I 69;US 59' }, line(-95.00, -94.95, 30.345)),
+  way(15, { highway: 'motorway', ref: 'US 70', old_ref: '70' }, line(-78.40, -78.35, 35.625)),
+  rel(5, { type: 'route', route: 'road', network: 'US:I', ref: '69' }, [12, 13, 14]),
   rel(3, { type: 'route', route: 'road', network: 'US:TX:Loop', ref: '20', name: 'Bob Bullock Loop', alt_name: 'Loop 1 (MoPac)', official_name: 'US 59 (TX)' }, [8]),
   rel(4, { type: 'route', route: 'road', network: 'US:I', ref: 'I 76', name: 'Pennsylvania Turnpike' }, [10]),
   rel(1, { type: 'route', route: 'road', network: 'US:TX:Loop', ref: '8' }, [2]),
@@ -54,6 +61,16 @@ test('names: refs by name, relation refs with their network word, unsigned SR nu
   assert.deepEqual(Object.keys(idx.names['NORTH INTERREGIONAL HIGHWAY']), ['I 35', 'US 77']); // "I 35;US 77": both
   assert.deepEqual(Object.keys(idx.names['IH ACCESS']), ['I 35', 'US 77']);
   assert.equal(idx.names['STATE HIGHWAY 9'], undefined); // TIGER's name_1 naming a number is left to the app's parser
+  // v3: a renumbered road's old number with its names and its current ref; a future number; a relation's ref on member ways that lack it.
+  assert.deepEqual(Object.keys(idx.names['CLAYTON BYPASS']), ['I 42', 'US 70']);
+  assert.deepEqual(Object.keys(idx.aliases['US 70']), ['I 42']);
+  assert.ok(decode(idx.aliases['US 70']['I 42']).includes('3562:-7845'));
+  assert.deepEqual(Object.keys(idx.aliases['I 69']), ['US 59']); // way 12's fut_ref and way 13 in the I 69 relation (unnamed both)
+  assert.ok(decode(idx.aliases['I 69']['US 59']).includes('3034:-9510')); // way 12
+  assert.ok(decode(idx.aliases['I 69']['US 59']).includes('3034:-9502')); // way 13
+  assert.ok(!decode(idx.aliases['I 69']['US 59']).includes('3034:-9497')); // way 14 carries I 69 itself
+  assert.equal(idx.aliases['70'], undefined); // a bare old number names no network
+  assert.deepEqual(Object.keys(idx.aliases['Loop 20']), ['US 59']); // Bob Bullock Loop's member way is signed US 59 only
   // gzip with mtime 0: the same input builds byte-identical files, so publish copies an unchanged state.
   const again = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
   execFileSync('python3', [path.join(DIR, 'names.py'), 'texas', again], { input: OPL });

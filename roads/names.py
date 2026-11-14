@@ -14,6 +14,10 @@ tie the two, only next to pavement that carries both (GRID squares).
   frontage: ref -> UPPERCASE names of non-freeway ways beside that ref's main lanes (~150 m, roughly parallel), named Frontage / Service
             Road, with a main-lane name, or carrying the ref themselves.
   unsigned: ref -> names, for refs that exist only as unsigned_ref.
+  aliases:  printed ref -> map ref -> grid squares where pavement carrying the map ref is also the printed one: a way's or route relation's
+            old_ref / fut_ref / official_ref / unsigned_ref (NC's Clayton Bypass is "I 42" with old_ref "US 70", and permits still print
+            US-70; I-69 at Cleveland, TX is "US 59" with fut_ref "I 69"), and a route relation's ref over member ways whose own ref lacks it
+            (a concurrency mapped only on the relation, named or not).
 """
 import sys, json, math, re, datetime, gzip, os
 from collections import defaultdict
@@ -70,6 +74,20 @@ def unesc(s):
 def refs_of(t):
     return [r.strip() for r in (t.get('ref') or '').split(';') if r.strip()]
 
+# Other numbers the same pavement is printed as: renumbered (old_ref), being renumbered (fut_ref), the DOT's own (official_ref), unsigned.
+OTHER_REF_KEYS = ('old_ref', 'fut_ref', 'official_ref', 'unsigned_ref')
+def other_refs(t):
+    out = []
+    for k in OTHER_REF_KEYS:
+        for r in (t.get(k) or '').split(';'):
+            r = r.strip()
+            if k == 'unsigned_ref' and re.fullmatch(r'\d+[A-Z]?', r):
+                r = f'SR {r}'  # as the unsigned names below
+            if r:
+                out.append(r)
+    return out
+norm = lambda r: re.sub(r'[\s-]+', '', r.upper())  # "I-69" and "I 69" are one ref
+
 ways = {}          # id -> (tags, coords)
 relations = []     # (tags, member way ids)
 for line in sys.stdin:
@@ -94,6 +112,7 @@ for line in sys.stdin:
 # routes across a state, so the app only reads a label as a route inside the cells where the two go together.
 names = defaultdict(lambda: defaultdict(set))
 unsigned = defaultdict(set)
+aliases = defaultdict(lambda: defaultdict(set))  # printed ref -> map ref -> cells
 GRID = 100  # cells per degree (~1.1 km): a name means a route only next to pavement that carries both (two "Main Street"s a town apart differ)
 def cells_of(coords):
     out = set()
@@ -114,12 +133,23 @@ def add_name(n, ref, coords):
         return  # a bare number would match every road with that number
     if n and ref and not re.fullmatch(r'[A-Z]{0,4}\s*\d+[A-Z]?', n):  # a name, not a bare number
         names[n][ref] |= cells_of(coords)
+def add_alias(printed, on, coords):
+    # A bare number names no network on either side ("70" is US 70, NC 70 or SR 70): left out, as in add_name.
+    if norm(printed) != norm(on) and not re.fullmatch(r'\d+[A-Z]?', printed) and not re.fullmatch(r'\d+[A-Z]?', on):
+        aliases[printed][on] |= cells_of(coords)
 
 for t, coords in ways.values():
     rs = refs_of(t)
     for r in rs:
         for n in names_of(t):
             add_name(n, r, coords)
+    for x in other_refs(t):
+        if any(norm(x) == norm(r) for r in rs):
+            continue
+        for n in names_of(t):
+            add_name(n, x, coords)
+        for r in rs:
+            add_alias(x, r, coords)
     for u in (t.get('unsigned_ref') or '').split(';'):
         u = u.strip()
         if re.fullmatch(r'\d+[A-Z]?', u):
@@ -144,8 +174,24 @@ def relation_ref(ref, net):
     return ref
 
 for t, members in relations:
-    rs = [r for r in (relation_ref(r, t.get('network') or '') for r in refs_of(t)) if r]
+    net = t.get('network') or ''
+    rs = [r for r in (relation_ref(r, net) for r in refs_of(t)) if r]
     member_ways = [ways[wid] for wid in members if wid in ways]
+    # Concurrency kept only on the relation: a member way whose own ref lacks the relation's is that route too, named or not (theme 19).
+    for ref in rs:
+        for wt, coords in member_ways:
+            wr = refs_of(wt)
+            if not any(norm(ref) == norm(w) for w in wr):
+                for w in wr:
+                    add_alias(ref, w, coords)
+    # The relation's old / future / official / unsigned numbers: its member ways' names, its own names, its own refs.
+    xs = [x for x in (relation_ref(x, net) for x in other_refs(t)) if x and not any(norm(x) == norm(r) for r in rs)]
+    for x in xs:
+        for wt, coords in member_ways:
+            for n in names_of(wt) + names_of(t, kept=()):
+                add_name(n, x, coords)
+            for r in rs:
+                add_alias(x, r, coords)
     for ref in rs:
         # The member ways' names carry the relation's ref even when a way's own ref differs (a concurrency, a ref left off the way).
         for wt, coords in member_ways:
@@ -228,6 +274,7 @@ out = {
     'names': {k: {r: enc(c) for r, c in sorted(v.items())} for k, v in sorted(names.items())},
     'frontage': {k: {n: enc(c) for n, c in sorted(v.items())} for k, v in sorted(frontage.items())},
     'unsigned': {k: sorted(v) for k, v in sorted(unsigned.items())},
+    'aliases': {k: {r: enc(c) for r, c in sorted(v.items())} for k, v in sorted(aliases.items())},
 }
 body = json.dumps(out, separators=(',', ':'), ensure_ascii=False).encode()
 if OUT:
@@ -236,4 +283,4 @@ if OUT:
         f.write(gzip.compress(body, 9, mtime=0))
 else:
     sys.stdout.buffer.write(body)
-print(f'{STATE}: {len(ways)} ways, {len(relations)} road relations -> {len(names)} names, {len(frontage)} routes with frontage names, {len(unsigned)} unsigned refs', file=sys.stderr)
+print(f'{STATE}: {len(ways)} ways, {len(relations)} road relations -> {len(names)} names, {len(frontage)} routes with frontage names, {len(unsigned)} unsigned refs, {len(aliases)} printed refs with aliases', file=sys.stderr)
