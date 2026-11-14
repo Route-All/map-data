@@ -31,6 +31,8 @@ const OPL = [
   way(13, { highway: 'motorway', ref: 'US 59' }, line(-95.05, -95.00, 30.345)),
   way(14, { highway: 'motorway', ref: 'I 69;US 59' }, line(-95.00, -94.95, 30.345)),
   way(15, { highway: 'motorway', ref: 'US 70', old_ref: '70' }, line(-78.40, -78.35, 35.625)),
+  way(16, { highway: 'primary', old_ref: 'US 80', name: 'Old Alignment Road' }, line(-97.30, -97.25, 31.505)),
+  way(17, { highway: 'primary', ref: 'FM 157', old_ref: 'Loop 496 (old US 287)', name: 'Cooper Street' }, line(-97.20, -97.15, 31.505)),
   rel(5, { type: 'route', route: 'road', network: 'US:I', ref: '69' }, [12, 13, 14]),
   rel(3, { type: 'route', route: 'road', network: 'US:TX:Loop', ref: '20', name: 'Bob Bullock Loop', alt_name: 'Loop 1 (MoPac)', official_name: 'US 59 (TX)' }, [8]),
   rel(4, { type: 'route', route: 'road', network: 'US:I', ref: 'I 76', name: 'Pennsylvania Turnpike' }, [10]),
@@ -71,6 +73,8 @@ test('names: refs by name, relation refs with their network word, unsigned SR nu
   assert.ok(!decode(idx.aliases['I 69']['US 59']).includes('3034:-9497')); // way 14 carries I 69 itself
   assert.equal(idx.aliases['70'], undefined); // a bare old number names no network
   assert.deepEqual(Object.keys(idx.aliases['Loop 20']), ['US 59']); // Bob Bullock Loop's member way is signed US 59 only
+  assert.equal(idx.names['OLD ALIGNMENT ROAD'], undefined); // an old_ref with no current ref is the old road, no longer US 80
+  assert.deepEqual(Object.keys(idx.names['COOPER STREET']), ['FM 157']); // a history in old_ref is not a ref
   // gzip with mtime 0: the same input builds byte-identical files, so publish copies an unchanged state.
   const again = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
   execFileSync('python3', [path.join(DIR, 'names.py'), 'texas', again], { input: OPL });

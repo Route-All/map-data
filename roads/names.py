@@ -75,15 +75,17 @@ def refs_of(t):
     return [r.strip() for r in (t.get('ref') or '').split(';') if r.strip()]
 
 # Other numbers the same pavement is printed as: renumbered (old_ref), being renumbered (fut_ref), the DOT's own (official_ref), unsigned.
+# Only a value shaped like one ref: OSM also keeps histories there ("FM 157 (old Loop 496 (old US 287))", "US-12, US-191"), which no permit prints.
 OTHER_REF_KEYS = ('old_ref', 'fut_ref', 'official_ref', 'unsigned_ref')
-def other_refs(t):
+ONE_REF = re.compile(r'[A-Za-z]{1,6}[ -]?\d+[A-Za-z]?(?: (?:Business|Bus|Bypass|Byp|Alternate|Alt|Truck|Spur|Loop|Connector|Toll))?')
+def other_refs(t, keys=OTHER_REF_KEYS):
     out = []
-    for k in OTHER_REF_KEYS:
+    for k in keys:
         for r in (t.get(k) or '').split(';'):
             r = r.strip()
             if k == 'unsigned_ref' and re.fullmatch(r'\d+[A-Z]?', r):
                 r = f'SR {r}'  # as the unsigned names below
-            if r:
+            if ONE_REF.fullmatch(r):
                 out.append(r)
     return out
 norm = lambda r: re.sub(r'[\s-]+', '', r.upper())  # "I-69" and "I 69" are one ref
@@ -143,11 +145,14 @@ for t, coords in ways.values():
     for r in rs:
         for n in names_of(t):
             add_name(n, r, coords)
-    for x in other_refs(t):
+    # Only beside a current ref: a way with an old_ref and no ref is the old alignment, no longer that route; one with only a fut_ref is not
+    # built yet. unsigned_ref's names are read below, as before.
+    for x in other_refs(t) if rs else ():
         if any(norm(x) == norm(r) for r in rs):
             continue
-        for n in names_of(t):
-            add_name(n, x, coords)
+        if x not in other_refs(t, ('unsigned_ref',)):
+            for n in names_of(t):
+                add_name(n, x, coords)
         for r in rs:
             add_alias(x, r, coords)
     for u in (t.get('unsigned_ref') or '').split(';'):
@@ -185,11 +190,14 @@ for t, members in relations:
                 for w in wr:
                     add_alias(ref, w, coords)
     # The relation's old / future / official / unsigned numbers: its member ways' names, its own names, its own refs.
-    xs = [x for x in (relation_ref(x, net) for x in other_refs(t)) if x and not any(norm(x) == norm(r) for r in rs)]
+    # As on ways: only beside a current ref, and unsigned_ref ties refs only (its names are read from the ways).
+    xs = [x for x in (relation_ref(x, net) for x in other_refs(t)) if x and not any(norm(x) == norm(r) for r in rs)] if rs else []
+    unsigned_xs = {relation_ref(x, net) for x in other_refs(t, ('unsigned_ref',))}
     for x in xs:
         for wt, coords in member_ways:
-            for n in names_of(wt) + names_of(t, kept=()):
-                add_name(n, x, coords)
+            if x not in unsigned_xs:
+                for n in names_of(wt) + names_of(t, kept=()):
+                    add_name(n, x, coords)
             for r in rs:
                 add_alias(x, r, coords)
     for ref in rs:
