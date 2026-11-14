@@ -83,3 +83,15 @@ test('names: finish refuses a build missing a state', () => {
   assert.throws(() => execFileSync('node', [path.join(DIR, 'names.mjs'), 'finish', work, '2'], { stdio: 'pipe' }), /1 road-name files for 2 states/);
   assert.throws(() => execFileSync('node', [path.join(DIR, 'names.mjs'), 'finish', work], { stdio: 'pipe' }), /usage/);
 });
+
+test('names: a lettered or single-digit designation in TIGER name_1 is not tied to the way ref (Fable review, PR #23)', () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-letter-'));
+  const opl = [
+    way(901, { highway: 'primary', ref: 'WI 21', name: 'Main Street', name_1: 'County Road F' }, line(-89.5, -89.4, 44.1)),
+    way(902, { highway: 'primary', ref: 'US 395', name_1: 'U.S. Route 9', name_2: 'I-5 (BUS)' }, line(-117.5, -117.4, 47.6)),
+  ].join('\n') + '\n';
+  execFileSync('python3', [path.join(DIR, 'names.py'), 'wisconsin', path.join(work, 'names')], { input: opl });
+  const out = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'names', 'WI.json.gz'))).toString());
+  assert.ok(out.names['MAIN STREET']?.['WI 21'], 'the way name is still tied');
+  for (const n of ['COUNTY ROAD F', 'U.S. ROUTE 9', 'I-5 (BUS)']) assert.equal(out.names[n], undefined, `${n} must not be indexed`);
+});

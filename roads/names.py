@@ -40,13 +40,17 @@ NAME_KEYS = V1_KEYS + ('reg_name', 'nat_name', 'short_name', 'int_name', 'name:e
 _ST = '|'.join(sorted({k.replace('-', ' ').upper() for k in ABBR} | set(ABBR.values()), key=len, reverse=True))
 _DIR = r'NORTH|SOUTH|EAST|WEST|NORTHBOUND|SOUTHBOUND|EASTBOUND|WESTBOUND|[NSEW]B?'
 # A designation starts with a network's word (the app's national audit uses the same words) and has a number in it ...
-_DESIG = re.compile(rf'(?:(?:{_DIR}|OLD) )?(?:(?:{_ST}) )?(?:(?:{_ST})[ -]?\d|I[ -]?\d|(?:INTERSTATE|IH|US|U\.S\.|UNITED STATES|STATE|COUNTY|CNTY|PARISH'
+# (Fable review, PR #23: a single-digit route ("I-5 (BUS)", "AR-5") and "U.S. ROUTE 9" passed; the number is a lookahead and U.S. sits outside \b.)
+_DESIG = re.compile(rf'(?=.*\d)(?:(?:{_DIR}|OLD) )?(?:(?:{_ST}) )?(?:(?:{_ST})[ -]?\d|I[ -]?\d|U\.\s?S\.|S\.\s?R\.|(?:INTERSTATE|IH|US|UNITED STATES|STATE|COUNTY|CNTY|PARISH'
                     rf'|HIGHWAY|HWY|ROUTE|RTE|RT|FM|RM|FARM|RANCH|URBAN|LOOP|SPUR|BUSINESS|FOREST|NATIONAL FOREST|TOWNSHIP|TWP|BIA|BUREAU|INDIAN'
-                    rf'|PARK ROAD|TRUNK|CR|SR|SH|STH|CTH|FR|FSR|NF)\b).*\d')
+                    rf'|PARK ROAD|TRUNK|CR|SR|SH|STH|CTH|FR|FSR|NF|CO RD|ST RT|M|K)\b)')
+# A lettered route is a designation too ("COUNTY ROAD HH", "COUNTY TRUNK HIGHWAY K", "CTH F", "ROUTE AA"): TIGER's name_1 naming ANOTHER lettered route
+# on the same pavement was tied to the way's ref (WI "COUNTY ROAD F" -> WI 21, ~636 such pairs). Fable review, PR #23.
+_LETTERED = re.compile(r'(?:(?:COUNTY|CNTY|CO|STATE|TOWNSHIP) (?:TRUNK )?(?:ROAD|RD|HIGHWAY|HWY|ROUTE|RTE)|CTH|STH|ROUTE|RTE|HIGHWAY|HWY) [A-Z]{1,3}$')
 # ... and any parenthetical only says where / which one ("(MA)", "(B - PECOS, TX)", "(CLOCKWISE)"). "LOOP 1 (MOPAC)" names the road: kept.
 _WHERE = re.compile(rf'(?:{_DIR})|[A-Z] - .*|(?:.*, )?(?:{_ST})|.*\b(?:CLOCKWISE|COUNTERCLOCKWISE|FORMER|OLD|BUS|BUSINESS|TRUCK|ALT|SCENIC)\b.*')
 def is_designation(n):
-    return bool(_DESIG.match(n)) and all(_WHERE.fullmatch(p.strip()) for p in re.findall(r'\(([^)]*)\)?', n))
+    return bool(_LETTERED.fullmatch(n.strip())) or (bool(_DESIG.match(n)) and all(_WHERE.fullmatch(p.strip()) for p in re.findall(r'\(([^)]*)\)?', n)))
 
 def tags_of(field):
     out = {}
