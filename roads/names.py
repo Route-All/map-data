@@ -14,6 +14,10 @@ tie the two, only next to pavement that carries both (GRID squares).
   frontage: ref -> UPPERCASE names of non-freeway ways beside that ref's main lanes (~150 m, roughly parallel), named Frontage / Service
             Road, with a main-lane name, or carrying the ref themselves.
   unsigned: ref -> names, for refs that exist only as unsigned_ref.
+  aliases:  printed ref -> map ref -> grid squares where pavement carrying the map ref is also the printed one: a way's or route relation's
+            old_ref / fut_ref / official_ref / unsigned_ref (NC's Clayton Bypass is "I 42" with old_ref "US 70", and permits still print
+            US-70; I-69 at Cleveland, TX is "US 59" with fut_ref "I 69"), and a route relation's ref over member ways whose own ref lacks it
+            (a concurrency mapped only on the relation, named or not).
 """
 import sys, json, math, re, datetime, gzip, os
 from collections import defaultdict
@@ -70,6 +74,63 @@ def unesc(s):
 def refs_of(t):
     return [r.strip() for r in (t.get('ref') or '').split(';') if r.strip()]
 
+# Other numbers the same pavement is printed as: renumbered (old_ref), being renumbered (fut_ref), the DOT's own (official_ref), unsigned.
+# Only a value shaped like one ref: OSM also keeps histories there ("FM 157 (old Loop 496 (old US 287))", "US-12, US-191"), which no permit prints.
+OTHER_REF_KEYS = ('old_ref', 'fut_ref', 'official_ref', 'unsigned_ref')
+ONE_REF = re.compile(r'[A-Za-z]{1,6}[ -]?\d+[A-Za-z]?(?: (?:Business|Bus|Bypass|Byp|Alternate|Alt|Truck|Spur|Loop|Connector|Toll))?')
+# ... and only a network the app reads as one (app services/permitRoute.ts roadClassKey): it reads any other word as a state route, so
+# "Exit 1A", "Old 50", "Road 17", "NASA 1" and AR's "Hwy 14" (an old state number, beside today's AR 14) would be state routes. Fable review, PR #24.
+NETWORKS = set(ABBR.values()) | {'I', 'IH', 'US', 'SR', 'SH', 'STH', 'K', 'M', 'N', 'CR', 'CO', 'CH', 'CTH', 'CNTY', 'CSAH', 'FM', 'RM', 'PR',
+                                 'LOOP', 'SPUR', 'BUSINESS', 'BUS', 'BL', 'BS', 'BI', 'BU', 'SL', 'SS'}
+canon = lambda r: re.sub(r'^([A-Za-z]+)[ -]*(?=\d)', r'\1 ', r)  # "US-412", "SR1596" -> "US 412", "SR 1596": one key per ref
+def ref_shaped(r):
+    return bool(ONE_REF.fullmatch(r)) and re.match(r'[A-Za-z]+', r).group().upper() in NETWORKS
+def other_refs(t, keys=OTHER_REF_KEYS, business=False):
+    out = []
+    for k in keys:
+        for r in (t.get(k) or '').split(';'):
+            r = r.strip()
+            if k == 'unsigned_ref' and re.fullmatch(r'\d+[A-Z]?', r):
+                if business:
+                    continue  # a business route's bare unsigned number is its hidden state number, not "SR 96E"
+                r = f'SR {r}'  # as the unsigned names below
+            if ref_shaped(r):
+                out.append(canon(r))
+    return out
+norm = lambda r: re.sub(r'[\s-]+', '', r.upper())  # "I-69" and "I 69" are one ref
+def number(r):
+    m = re.search(r'\d+[A-Z]?', r.upper())
+    return m.group() if m else None
+# One road whatever the network's spelling: "OH 121" is "SR 121", "M 13" "MI 13", "US 1 Alt" "US 1 Alternate".
+same_ref = lambda a, b: norm(a) == norm(b) or (number(a) is not None and number(a) == number(b))
+# A network's rank: Interstate 4, US 3, state 2, anything else (FM, county, loop, business, truck, a lettered business or spur ...) 1.
+LOW_NET = {'CR', 'FM', 'RM', 'PR', 'CH', 'TR', 'TH', 'FR', 'NF', 'FS', 'FH', 'BL', 'BS', 'BI', 'BU'}
+def rank(r, lettered_low=False):
+    u = r.upper()
+    # As a road an old number moved onto, "US 412B", "US 63B", "AR 4S", "AR 367Y" are the parent's business / spur / connector routes, as low
+    # as "US 412 Business" (Fable review, PR #24). As the old number itself the letter changes nothing: old "US 63B" is no lower than AR 18.
+    # E/W/N/S are split routes of the same network (US 19E, I 35W, I 80N): no lower.
+    if re.search(r'\b(?:BUSINESS|BUS|ALT|ALTERNATE|TRUCK|SPUR|LOOP|BYPASS|BYP|CONNECTOR|TOLL)\b', u) \
+            or (lettered_low and re.search(r'\d[A-DF-MO-RT-VX-Z]\b', u)):
+        return 1
+    m = re.match(r'([A-Z]+)[ -]?\d', u)
+    p = m.group(1) if m else ''
+    if p in ('I', 'IH'):
+        return 4
+    if p == 'US':
+        return 3
+    if p not in LOW_NET and (p in ABBR.values() or p in ('SR', 'SH', 'STH', 'K', 'M', 'N')):
+        return 2
+    return 1
+def road_class(r):
+    # The app's identity for a ref (roadClassKey, roughly): Interstate, US, county, FM/RM/PR, else state, with the number and any route word.
+    # "US 412" and "US 412B" differ; "Hwy 14", "SR 14" and "AR 14" are one.
+    m = re.fullmatch(r'([A-Z]*) ?(\d+[A-Z]?)(?: ([A-Z]+))?', re.sub(r'[\s-]+', ' ', r.upper()).strip())
+    if not m:
+        return norm(r)
+    p, n, w = m.groups()
+    p = 'I' if p in ('I', 'IH') else p if p in ('US', 'FM', 'RM', 'PR') else 'CR' if p in ('CR', 'CO', 'CH', 'CTH', 'CNTY', 'CSAH') else 'S'
+    return f'{p}{n}{w or ""}'
 ways = {}          # id -> (tags, coords)
 relations = []     # (tags, member way ids)
 for line in sys.stdin:
@@ -94,6 +155,7 @@ for line in sys.stdin:
 # routes across a state, so the app only reads a label as a route inside the cells where the two go together.
 names = defaultdict(lambda: defaultdict(set))
 unsigned = defaultdict(set)
+aliases = defaultdict(lambda: defaultdict(set))  # printed ref -> map ref -> cells
 GRID = 100  # cells per degree (~1.1 km): a name means a route only next to pavement that carries both (two "Main Street"s a town apart differ)
 def cells_of(coords):
     out = set()
@@ -108,32 +170,28 @@ def cells_of(coords):
 def names_of(t, kept=V1_KEYS):
     # The `kept` tags as they are (v1's, so nothing v1 had is lost); the others without the bare designations.
     return [n for k in NAME_KEYS for n in (t.get(k) or '').split(';') if k in kept or not is_designation(n.strip().upper())]
-def add_name(n, ref, coords):
+def add_name(n, ref, cells):
     n = (n or '').strip().upper()
     if re.fullmatch(r'\d+[A-Z]?', ref or ''):
         return  # a bare number would match every road with that number
-    if n and ref and not re.fullmatch(r'[A-Z]{0,4}\s*\d+[A-Z]?', n):  # a name, not a bare number
-        names[n][ref] |= cells_of(coords)
-
-for t, coords in ways.values():
-    rs = refs_of(t)
-    for r in rs:
-        for n in names_of(t):
-            add_name(n, r, coords)
-    for u in (t.get('unsigned_ref') or '').split(';'):
-        u = u.strip()
-        if re.fullmatch(r'\d+[A-Z]?', u):
-            u = f'SR {u}'  # state-maintained numbers kept off the signs (PA quadrant routes, NC secondary roads) print as "SR 1002"
-        if u and re.fullmatch(r'[A-Z]+.*', u):
-            for key in ('name', 'alt_name'):
-                for n in (t.get(key) or '').split(';'):
-                    add_name(n, u, coords)
-                    if n.strip():
-                        unsigned[u].add(n.strip().upper())
+    if n and ref and cells and not re.fullmatch(r'[A-Z]{0,4}\s*\d+[A-Z]?', n):  # a name, not a bare number
+        names[n][ref] |= cells
+def add_alias(printed, on, cells):
+    # Both sides one ref of a network the app reads ("I 42", "US 70", "Loop 8"): a bare number ("70"), bare letters ("A", "E"), a network
+    # id ("US:AL:Autauga") or another word ("Exit 1A", "Hwy 14") names no road. A side that is the other without its prefix ("CTH A" / "A",
+    # "CR A1" / "A1") is no second number. One spelling per ref ("US-412" is "US 412").
+    printed, on = canon(printed), canon(on)
+    a, b = norm(printed), norm(on)
+    if a != b and cells and ref_shaped(printed) and ref_shaped(on) and not a.endswith(b) and not b.endswith(a):
+        aliases[printed][on] |= cells
 
 def relation_ref(ref, net):
     # A relation's ref is bare in some networks ("8" in US:TX:Loop): give it its network's word.
     if re.fullmatch(r'\d+[A-Z]?', ref):
+        # An Interstate's or US route's business route is that route's: "I 75 Business", never "Loop 75" (US:I:Business:Loop).
+        biz = re.match(r'US:(I|US):Business', net)
+        if biz:
+            return f'{biz.group(1)} {ref} Business'
         last = net.split(':')[-1]
         word = {'Loop': 'Loop', 'Spur': 'Spur', 'FM': 'FM', 'RM': 'RM', 'Business': 'Business', 'Beltway': 'Loop', 'I': 'I', 'US': 'US'}.get(last)
         if not word and re.fullmatch(r'[A-Z]{2}', last) and net.startswith('US:'):
@@ -143,18 +201,102 @@ def relation_ref(ref, net):
         ref = f'{word} {ref}'
     return ref
 
+# Where each ref is a current ref (a way's, or a route relation's over its member ways), by the app's identity for it.
+live = defaultdict(set)
+for t, coords in ways.values():
+    for r in refs_of(t):
+        live[road_class(r)] |= cells_of(coords)
 for t, members in relations:
-    rs = [r for r in (relation_ref(r, t.get('network') or '') for r in refs_of(t)) if r]
+    for r in (relation_ref(r, t.get('network') or '') for r in refs_of(t)):
+        if r:
+            for wid in members:
+                if wid in ways:
+                    live[road_class(r)] |= cells_of(ways[wid][1])
+def old_targets(x, refs):
+    # An old_ref on a lower network is the old alignment the route left (ref AR 367, old_ref US 67, the US 67 freeway a few km west): tying the
+    # live number to it would read the lower road as the route, however far the route moved. Only the refs no lower than the old one take it
+    # (I 42 old US 70, I 84 old I 80N, US 491 old US 666). On a freeway too: Milwaukee's WI 175 freeway is old US 41.
+    return [r for r in refs if rank(r, lettered_low=True) >= rank(x)]
+def off_old(x, cells):
+    # ... and even then only away from the number's pavement today: in a square within one (the app's reach) of a way or route relation that
+    # carries the old number now, it is the number moved onto a parallel road (NC's I 795 old US 117, beside US 117) or a business route beside
+    # its parent ("US 412B" old US 412). Left out there, names and aliases both. Fable review, PR #24: a direct test, so a rank that guesses
+    # wrong (two US routes) cannot tie a live number to another road beside it. Kept: I 42 old US 70 (Clayton Bypass), US 491 old US 666.
+    now = live.get(road_class(x))
+    if not now:
+        return cells
+    def near(c):
+        la, lo = map(int, c.split(':'))
+        return any(f'{la + dy}:{lo + dx}' in now for dy in (-1, 0, 1) for dx in (-1, 0, 1))
+    return {c for c in cells if not near(c)}
+
+for t, coords in ways.values():
+    rs = refs_of(t)
+    cells = cells_of(coords)
+    for r in rs:
+        for n in names_of(t):
+            add_name(n, r, cells)
+    # Only beside a current ref: a way with an old_ref and no ref is the old alignment, no longer that route; one with only a fut_ref is not
+    # built yet. unsigned_ref's names are read below, as before.
+    olds = other_refs(t, ('old_ref',))
+    for x in other_refs(t) if rs else ():
+        if any(same_ref(x, r) for r in rs):
+            continue
+        on, xc = (old_targets(x, rs), off_old(x, cells)) if x in olds else (rs, cells)
+        if not on:
+            continue
+        if x not in other_refs(t, ('unsigned_ref',)):
+            for n in names_of(t):
+                add_name(n, x, xc)
+        for r in on:
+            add_alias(x, r, xc)
+    for u in (t.get('unsigned_ref') or '').split(';'):
+        u = u.strip()
+        if re.fullmatch(r'\d+[A-Z]?', u):
+            u = f'SR {u}'  # state-maintained numbers kept off the signs (PA quadrant routes, NC secondary roads) print as "SR 1002"
+        if u and re.fullmatch(r'[A-Z]+.*', u):
+            for key in ('name', 'alt_name'):
+                for n in (t.get(key) or '').split(';'):
+                    add_name(n, u, cells)
+                    if n.strip():
+                        unsigned[u].add(n.strip().upper())
+
+for t, members in relations:
+    net = t.get('network') or ''
+    rs = [r for r in (relation_ref(r, net) for r in refs_of(t)) if r]
     member_ways = [ways[wid] for wid in members if wid in ways]
+    # Concurrency kept only on the relation: a member way whose own ref lacks the relation's is that route too, named or not (theme 19).
+    for ref in rs:
+        for wt, coords in member_ways:
+            wr = refs_of(wt)
+            if not any(same_ref(ref, w) for w in wr):
+                for w in wr:
+                    add_alias(ref, w, cells_of(coords))
+    # The relation's old / future / official / unsigned numbers: its member ways' names, its own names, its own refs.
+    # As on ways: only beside a current ref, and unsigned_ref ties refs only (its names are read from the ways).
+    biz = 'Business' in net
+    xs = [x for x in (relation_ref(x, net) for x in other_refs(t, business=biz)) if x and not any(same_ref(x, r) for r in rs)] if rs else []
+    unsigned_xs = {relation_ref(x, net) for x in other_refs(t, ('unsigned_ref',), business=biz)}
+    olds = {relation_ref(x, net) for x in other_refs(t, ('old_ref',))}
+    for x in xs:
+        for wt, coords in member_ways:
+            on, xc = (old_targets(x, rs), off_old(x, cells_of(coords))) if x in olds else (rs, cells_of(coords))
+            if not on:
+                continue
+            if x not in unsigned_xs:
+                for n in names_of(wt) + names_of(t, kept=()):
+                    add_name(n, x, xc)
+            for r in on:
+                add_alias(x, r, xc)
     for ref in rs:
         # The member ways' names carry the relation's ref even when a way's own ref differs (a concurrency, a ref left off the way).
         for wt, coords in member_ways:
             for n in names_of(wt):
-                add_name(n, ref, coords)
+                add_name(n, ref, cells_of(coords))
         # The relation's own names ("Pennsylvania Turnpike" on I 76, "Bob Bullock Loop" on US:TX:Loop 20) over every member way.
         for n in names_of(t, kept=()):
             for _, coords in member_ways:
-                add_name(n, ref, coords)
+                add_name(n, ref, cells_of(coords))
 
 # Frontage: non-freeway ways beside a ref's main lanes.
 grid = defaultdict(list)  # cell -> [(ref, bearing)]
@@ -228,6 +370,7 @@ out = {
     'names': {k: {r: enc(c) for r, c in sorted(v.items())} for k, v in sorted(names.items())},
     'frontage': {k: {n: enc(c) for n, c in sorted(v.items())} for k, v in sorted(frontage.items())},
     'unsigned': {k: sorted(v) for k, v in sorted(unsigned.items())},
+    'aliases': {k: {r: enc(c) for r, c in sorted(v.items())} for k, v in sorted(aliases.items())},
 }
 body = json.dumps(out, separators=(',', ':'), ensure_ascii=False).encode()
 if OUT:
@@ -236,4 +379,4 @@ if OUT:
         f.write(gzip.compress(body, 9, mtime=0))
 else:
     sys.stdout.buffer.write(body)
-print(f'{STATE}: {len(ways)} ways, {len(relations)} road relations -> {len(names)} names, {len(frontage)} routes with frontage names, {len(unsigned)} unsigned refs', file=sys.stderr)
+print(f'{STATE}: {len(ways)} ways, {len(relations)} road relations -> {len(names)} names, {len(frontage)} routes with frontage names, {len(unsigned)} unsigned refs, {len(aliases)} printed refs with aliases', file=sys.stderr)

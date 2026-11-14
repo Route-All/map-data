@@ -25,6 +25,15 @@ const OPL = [
   way(8, { highway: 'trunk', ref: 'US 59', name: 'Saunders Street' }, line(-99.50, -99.45, 27.55)),
   way(9, { highway: 'primary', ref: 'I 35;US 77', name: 'North Interregional Highway', name_1: 'State Highway 9', short_name: 'IH Access' }, line(-97.70, -97.69, 30.30)),
   way(10, { highway: 'motorway', ref: 'I 76', name: 'Mainline' }, line(-77.00, -76.95, 40.20)),
+  // v3: renumbered roads and a concurrency kept only on the relation.
+  way(11, { highway: 'motorway', ref: 'I 42', old_ref: 'US 70', name: 'Clayton Bypass' }, line(-78.45, -78.40, 35.625)),
+  way(12, { highway: 'motorway', ref: 'US 59', fut_ref: 'I 69' }, line(-95.10, -95.05, 30.345)),
+  way(13, { highway: 'motorway', ref: 'US 59' }, line(-95.05, -95.00, 30.345)),
+  way(14, { highway: 'motorway', ref: 'I 69;US 59' }, line(-95.00, -94.95, 30.345)),
+  way(15, { highway: 'motorway', ref: 'US 70', old_ref: '70' }, line(-78.40, -78.35, 35.625)),
+  way(16, { highway: 'primary', old_ref: 'US 80', name: 'Old Alignment Road' }, line(-97.30, -97.25, 31.505)),
+  way(17, { highway: 'primary', ref: 'FM 157', old_ref: 'Loop 496 (old US 287)', name: 'Cooper Street' }, line(-97.20, -97.15, 31.505)),
+  rel(5, { type: 'route', route: 'road', network: 'US:I', ref: '69' }, [12, 13, 14]),
   rel(3, { type: 'route', route: 'road', network: 'US:TX:Loop', ref: '20', name: 'Bob Bullock Loop', alt_name: 'Loop 1 (MoPac)', official_name: 'US 59 (TX)' }, [8]),
   rel(4, { type: 'route', route: 'road', network: 'US:I', ref: 'I 76', name: 'Pennsylvania Turnpike' }, [10]),
   rel(1, { type: 'route', route: 'road', network: 'US:TX:Loop', ref: '8' }, [2]),
@@ -54,6 +63,18 @@ test('names: refs by name, relation refs with their network word, unsigned SR nu
   assert.deepEqual(Object.keys(idx.names['NORTH INTERREGIONAL HIGHWAY']), ['I 35', 'US 77']); // "I 35;US 77": both
   assert.deepEqual(Object.keys(idx.names['IH ACCESS']), ['I 35', 'US 77']);
   assert.equal(idx.names['STATE HIGHWAY 9'], undefined); // TIGER's name_1 naming a number is left to the app's parser
+  // v3: a renumbered road's old number with its names and its current ref; a future number; a relation's ref on member ways that lack it.
+  assert.deepEqual(Object.keys(idx.names['CLAYTON BYPASS']), ['I 42', 'US 70']);
+  assert.deepEqual(Object.keys(idx.aliases['US 70']), ['I 42']);
+  assert.ok(decode(idx.aliases['US 70']['I 42']).includes('3562:-7845'));
+  assert.deepEqual(Object.keys(idx.aliases['I 69']), ['US 59']); // way 12's fut_ref and way 13 in the I 69 relation (unnamed both)
+  assert.ok(decode(idx.aliases['I 69']['US 59']).includes('3034:-9510')); // way 12
+  assert.ok(decode(idx.aliases['I 69']['US 59']).includes('3034:-9502')); // way 13
+  assert.ok(!decode(idx.aliases['I 69']['US 59']).includes('3034:-9497')); // way 14 carries I 69 itself
+  assert.equal(idx.aliases['70'], undefined); // a bare old number names no network
+  assert.deepEqual(Object.keys(idx.aliases['Loop 20']), ['US 59']); // Bob Bullock Loop's member way is signed US 59 only
+  assert.equal(idx.names['OLD ALIGNMENT ROAD'], undefined); // an old_ref with no current ref is the old road, no longer US 80
+  assert.deepEqual(Object.keys(idx.names['COOPER STREET']), ['FM 157']); // a history in old_ref is not a ref
   // gzip with mtime 0: the same input builds byte-identical files, so publish copies an unchanged state.
   const again = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
   execFileSync('python3', [path.join(DIR, 'names.py'), 'texas', again], { input: OPL });
@@ -94,4 +115,73 @@ test('names: a lettered or single-digit designation in TIGER name_1 is not tied 
   const out = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'names', 'WI.json.gz'))).toString());
   assert.ok(out.names['MAIN STREET']?.['WI 21'], 'the way name is still tied');
   for (const n of ['COUNTY ROAD F', 'U.S. ROUTE 9', 'I-5 (BUS)']) assert.equal(out.names[n], undefined, `${n} must not be indexed`);
+});
+
+test('names v3 aliases: old alignments, spelling, network shapes, business routes (Fable review, PR #24)', () => {
+  const opl = [
+    // An old alignment beside a lower network: AR 367 is old US 67, and US 67 still runs nearby. No tie either way.
+    way(1, { highway: 'primary', ref: 'AR 367', old_ref: 'US 67', name: 'Old Highway Road' }, line(-92.00, -91.95, 35.005)),
+    // A freeway that became a state route is not its old US route (WI 175, old US 41).
+    way(11, { highway: 'motorway', ref: 'WI 175', old_ref: 'US 41', name: 'Stadium Freeway' }, line(-87.95, -87.90, 43.005)),
+    // An Interstate keeps its old number (I 42 / US 70), as does a US route renumbered as a US route.
+    way(2, { highway: 'motorway', ref: 'I 42', old_ref: 'US 70', name: 'Clayton Bypass' }, line(-78.45, -78.40, 35.625)),
+    way(3, { highway: 'primary', ref: 'US 491', old_ref: 'US 666', name: 'Devils Highway' }, line(-108.80, -108.75, 36.505)),
+    // The relation's ref spelled otherwise on the way (OH 121 / SR 121): carried, so no alias, and nothing dragged in (SR 49).
+    way(4, { highway: 'primary', ref: 'SR 121;SR 49' }, line(-84.50, -84.45, 40.005)),
+    rel(1, { type: 'route', route: 'road', network: 'US:OH', ref: '121' }, [4]),
+    // A printed key with no network ("A" over "CTH A"; a county network id) is no ref.
+    way(5, { highway: 'secondary', ref: 'CTH A' }, line(-89.40, -89.35, 43.005)),
+    rel(2, { type: 'route', route: 'road', network: 'US:WI:Dane', ref: 'A' }, [5]),
+    // An Interstate business loop is "I 75 Business", not "Loop 75"; a business route's bare unsigned_ref is no "SR 96E".
+    way(6, { highway: 'primary', ref: 'US 224' }, line(-83.70, -83.65, 41.005)),
+    rel(3, { type: 'route', route: 'road', network: 'US:I:Business:Loop', ref: '75', unsigned_ref: '96E' }, [6]),
+    // A relation's old_ref goes the same way as a way's: kept on a freeway member, dropped beside a lower network.
+    way(7, { highway: 'motorway', ref: 'I 42' }, line(-78.40, -78.35, 35.625)),
+    rel(4, { type: 'route', route: 'road', network: 'US:I', ref: '42', old_ref: 'US 70' }, [7]),
+    way(8, { highway: 'primary', ref: 'AR 367' }, line(-91.95, -91.90, 35.005)),
+    rel(5, { type: 'route', route: 'road', network: 'US:AR', ref: '367', old_ref: 'US 67' }, [8]),
+    // A lettered business route is no US route: "US 67B;AR 367" with old_ref US 67 ties neither.
+    way(10, { highway: 'primary', ref: 'US 67B;AR 367', old_ref: 'US 67' }, line(-91.90, -91.85, 35.005)),
+    // Real cases, Fable review PR #24 (live OSM tags). AR: primary US 412B with old_ref US 412, beside trunk US 412.
+    way(20, { highway: 'trunk', ref: 'US 412' }, line(-90.55, -90.45, 36.050)),
+    way(21, { highway: 'primary', ref: 'US 412B', old_ref: 'US 412', name: 'Kingshighway' }, line(-90.55, -90.45, 36.053)),
+    // NC: motorway I 795 with old_ref US 117; live US 117 runs alongside its first half only (x -77.95..-77.90).
+    way(22, { highway: 'primary', ref: 'US 117', name: 'Old Goldsboro Road' }, line(-77.95, -77.90, 35.503)),
+    way(23, { highway: 'motorway', ref: 'I 795', old_ref: 'US 117', name: 'Future Freeway' }, line(-77.95, -77.80, 35.500, 30)),
+    // AR: "Hwy 14" names no network the app reads (it would read it as AR 14, which runs beside); junk shapes likewise.
+    way(24, { highway: 'primary', ref: 'AR 14', name: 'Fourteen Road' }, line(-91.30, -91.25, 35.703)),
+    way(25, { highway: 'primary', ref: 'AR 17', old_ref: 'Hwy 14', fut_ref: 'Exit 1A', official_ref: 'NASA 1', name: 'Seventeen Road' }, line(-91.30, -91.25, 35.700)),
+    // One spelling per ref: "US-59" / "I-69" are "US 59" / "I 69".
+    way(26, { highway: 'motorway', ref: 'US-59', fut_ref: 'I-69' }, line(-95.20, -95.15, 30.345)),
+    // A hidden state number on a way (TN's US 41 is SR 2): an alias.
+    way(9, { highway: 'primary', ref: 'US 41', unsigned_ref: '2' }, line(-86.80, -86.75, 36.105)),
+  ].join('\n') + '\n';
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
+  execFileSync('python3', [path.join(DIR, 'names.py'), 'texas', work], { input: opl });
+  const idx = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'TX.json.gz'))));
+  assert.equal(idx.aliases['US 67'], undefined); // neither AR 367 (lower) nor US 67B (a business route)
+  assert.equal(idx.aliases['US 412'], undefined); // US 412B is not US 412, which runs beside it
+  assert.deepEqual(Object.keys(idx.names.KINGSHIGHWAY), ['US 412B']);
+  // I 795 is old US 117 only away from today's US 117: none of the squares beside it, the far half kept (names too).
+  const i795 = decode(idx.aliases['US 117']['I 795']), us117 = decode(idx.names['OLD GOLDSBORO ROAD']['US 117']);
+  const near = (c) => { const [la, lo] = c.split(':').map(Number); return us117.some((u) => { const [a, b] = u.split(':').map(Number); return Math.abs(a - la) <= 1 && Math.abs(b - lo) <= 1; }); };
+  assert.ok(i795.length > 0 && !i795.some(near), 'no I 795 square within one of US 117');
+  assert.ok(i795.includes('3550:-7782'), 'the far half keeps the old number');
+  assert.deepEqual(decode(idx.names['FUTURE FREEWAY']['US 117']), i795);
+  for (const k of ['Hwy 14', 'Exit 1A', 'NASA 1', 'US-59', 'I-69']) assert.equal(idx.aliases[k], undefined, k);
+  assert.deepEqual(Object.keys(idx.names['SEVENTEEN ROAD']), ['AR 17']);
+  assert.ok(decode(idx.aliases['I 69']['US 59']).includes('3034:-9520'));
+  assert.deepEqual(Object.keys(idx.names['OLD HIGHWAY ROAD']), ['AR 367']);
+  assert.deepEqual(Object.keys(idx.names['CLAYTON BYPASS']), ['I 42', 'US 70']);
+  assert.deepEqual(Object.keys(idx.aliases['US 70']), ['I 42']);
+  assert.ok(decode(idx.aliases['US 70']['I 42']).includes('3562:-7837')); // way 7, through relation 4's old_ref
+  assert.deepEqual(Object.keys(idx.aliases['US 666']), ['US 491']);
+  assert.deepEqual(Object.keys(idx.names['STADIUM FREEWAY']), ['WI 175']);
+  assert.equal(idx.aliases['OH 121'], undefined);
+  assert.equal(idx.aliases.A, undefined);
+  assert.deepEqual(Object.keys(idx.aliases['I 75 Business']), ['US 224']);
+  assert.equal(idx.aliases['Loop 75'], undefined);
+  assert.equal(idx.aliases['SR 96E'], undefined);
+  assert.deepEqual(Object.keys(idx.aliases['SR 2']), ['US 41']);
+  assert.deepEqual(Object.keys(idx.aliases).sort(), ['I 69', 'I 75 Business', 'SR 2', 'US 117', 'US 666', 'US 70']);
 });
