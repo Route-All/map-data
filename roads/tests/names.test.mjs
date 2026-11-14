@@ -140,15 +140,37 @@ test('names v3 aliases: old alignments, spelling, network shapes, business route
     rel(4, { type: 'route', route: 'road', network: 'US:I', ref: '42', old_ref: 'US 70' }, [7]),
     way(8, { highway: 'primary', ref: 'AR 367' }, line(-91.95, -91.90, 35.005)),
     rel(5, { type: 'route', route: 'road', network: 'US:AR', ref: '367', old_ref: 'US 67' }, [8]),
-    // Of "US 67B;AR 367" with old_ref US 67, only US 67B takes it.
+    // A lettered business route is no US route: "US 67B;AR 367" with old_ref US 67 ties neither.
     way(10, { highway: 'primary', ref: 'US 67B;AR 367', old_ref: 'US 67' }, line(-91.90, -91.85, 35.005)),
+    // Real cases, Fable review PR #24 (live OSM tags). AR: primary US 412B with old_ref US 412, beside trunk US 412.
+    way(20, { highway: 'trunk', ref: 'US 412' }, line(-90.55, -90.45, 36.050)),
+    way(21, { highway: 'primary', ref: 'US 412B', old_ref: 'US 412', name: 'Kingshighway' }, line(-90.55, -90.45, 36.053)),
+    // NC: motorway I 795 with old_ref US 117; live US 117 runs alongside its first half only (x -77.95..-77.90).
+    way(22, { highway: 'primary', ref: 'US 117', name: 'Old Goldsboro Road' }, line(-77.95, -77.90, 35.503)),
+    way(23, { highway: 'motorway', ref: 'I 795', old_ref: 'US 117', name: 'Future Freeway' }, line(-77.95, -77.80, 35.500, 30)),
+    // AR: "Hwy 14" names no network the app reads (it would read it as AR 14, which runs beside); junk shapes likewise.
+    way(24, { highway: 'primary', ref: 'AR 14', name: 'Fourteen Road' }, line(-91.30, -91.25, 35.703)),
+    way(25, { highway: 'primary', ref: 'AR 17', old_ref: 'Hwy 14', fut_ref: 'Exit 1A', official_ref: 'NASA 1', name: 'Seventeen Road' }, line(-91.30, -91.25, 35.700)),
+    // One spelling per ref: "US-59" / "I-69" are "US 59" / "I 69".
+    way(26, { highway: 'motorway', ref: 'US-59', fut_ref: 'I-69' }, line(-95.20, -95.15, 30.345)),
     // A hidden state number on a way (TN's US 41 is SR 2): an alias.
     way(9, { highway: 'primary', ref: 'US 41', unsigned_ref: '2' }, line(-86.80, -86.75, 36.105)),
   ].join('\n') + '\n';
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
   execFileSync('python3', [path.join(DIR, 'names.py'), 'texas', work], { input: opl });
   const idx = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'TX.json.gz'))));
-  assert.deepEqual(Object.keys(idx.aliases['US 67']), ['US 67B']);
+  assert.equal(idx.aliases['US 67'], undefined); // neither AR 367 (lower) nor US 67B (a business route)
+  assert.equal(idx.aliases['US 412'], undefined); // US 412B is not US 412, which runs beside it
+  assert.deepEqual(Object.keys(idx.names.KINGSHIGHWAY), ['US 412B']);
+  // I 795 is old US 117 only away from today's US 117: none of the squares beside it, the far half kept (names too).
+  const i795 = decode(idx.aliases['US 117']['I 795']), us117 = decode(idx.names['OLD GOLDSBORO ROAD']['US 117']);
+  const near = (c) => { const [la, lo] = c.split(':').map(Number); return us117.some((u) => { const [a, b] = u.split(':').map(Number); return Math.abs(a - la) <= 1 && Math.abs(b - lo) <= 1; }); };
+  assert.ok(i795.length > 0 && !i795.some(near), 'no I 795 square within one of US 117');
+  assert.ok(i795.includes('3550:-7782'), 'the far half keeps the old number');
+  assert.deepEqual(decode(idx.names['FUTURE FREEWAY']['US 117']), i795);
+  for (const k of ['Hwy 14', 'Exit 1A', 'NASA 1', 'US-59', 'I-69']) assert.equal(idx.aliases[k], undefined, k);
+  assert.deepEqual(Object.keys(idx.names['SEVENTEEN ROAD']), ['AR 17']);
+  assert.ok(decode(idx.aliases['I 69']['US 59']).includes('3034:-9520'));
   assert.deepEqual(Object.keys(idx.names['OLD HIGHWAY ROAD']), ['AR 367']);
   assert.deepEqual(Object.keys(idx.names['CLAYTON BYPASS']), ['I 42', 'US 70']);
   assert.deepEqual(Object.keys(idx.aliases['US 70']), ['I 42']);
@@ -161,5 +183,5 @@ test('names v3 aliases: old alignments, spelling, network shapes, business route
   assert.equal(idx.aliases['Loop 75'], undefined);
   assert.equal(idx.aliases['SR 96E'], undefined);
   assert.deepEqual(Object.keys(idx.aliases['SR 2']), ['US 41']);
-  assert.deepEqual(Object.keys(idx.aliases).sort(), ['I 75 Business', 'SR 2', 'US 666', 'US 67', 'US 70']);
+  assert.deepEqual(Object.keys(idx.aliases).sort(), ['I 69', 'I 75 Business', 'SR 2', 'US 117', 'US 666', 'US 70']);
 });

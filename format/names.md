@@ -32,10 +32,14 @@ file whose size or SHA-256 differs from the pointer.
   `unsigned_ref` against its `ref` (NC's Clayton Bypass: `"US 70": { "I 42": … }`; I-69 at Cleveland, TX: `"I 69": { "US 59": … }`),
   and a route relation's ref against a member way's own refs when the way's `ref` lacks it (a concurrency mapped only on the
   relation, named or unnamed: a way whose ref has the relation's number under another spelling, "SR 121" for "OH 121", carries it).
-  An `old_ref` counts only for the way's refs of no lower a network (Interstate, US, state, then the rest): "AR 367" with old_ref
-  "US 67" is the old alignment, not US 67; "I 42" with old_ref "US 70" is US 70 renumbered. Refs as OSM writes them, and both sides must be one ref with
-  its network ("I 42", "US 70", "Loop 8", "I 75 Business"): a bare number ("70"), bare letters ("A"), a network id, or a side that is
-  the other without its prefix ("CTH A" / "A") is left out. The app reads the pairs both ways (services/roadNames.ts `refAliases`),
+  An `old_ref` counts only for the way's refs of no lower a network (Interstate, US, state, then the rest, where a lettered business or
+  spur route such as "US 412B" is the rest): "AR 367" with old_ref "US 67" is the old alignment, not US 67; "I 42" with old_ref "US 70"
+  is US 70 renumbered. And never in a square within one of pavement that carries the old number today (a way's ref, or a route
+  relation's over its member ways): there the number moved onto a parallel road (NC's I 795, old US 117, beside today's US 117), so
+  that square gets neither the alias nor the name. Both sides must be one ref of a network the app reads ("I 42", "US 70", "Loop 8",
+  "I 75 Business", "SR 1002", "CR 12", "FM 157"), written "US 412" whatever OSM's spelling ("US-412"): a bare number ("70"), bare
+  letters ("A"), a network id, another word ("Hwy 14", "Exit 1A", "Old 50", "Road 17"), or a side that is the other without its
+  prefix ("CTH A" / "A") is left out. The app reads the pairs both ways (services/roadNames.ts `refAliases`),
   only in a square (or its 8 neighbours) listed here.
 
 Squares are one string per entry, sorted, as small steps: the first square `lat,lng`, then `dlat,dlng`, or `dlng` alone on
