@@ -59,10 +59,25 @@ async function add(work) {
     bytes = 0;
   };
   const push = (map, key, line) => { if (!map.has(key)) map.set(key, []); map.get(key).push(line); bytes += line.length; };
+  // This state's road route relations by way (build.sh, routes.mjs), kept as the way's `routes` tag.
+  const routesFile = path.join(work, 'routes.tsv'), routes = new Map(), routed = [];
+  if (fs.existsSync(routesFile)) for (const line of fs.readFileSync(routesFile, 'utf8').split('\n')) {
+    const tab = line.indexOf('\t');
+    if (tab > 0) routes.set(line.slice(0, tab), line.slice(tab + 1));
+  }
   for await (const text of readline.createInterface({ input: process.stdin, crlfDelay: Infinity })) {
     if (!text.trim()) continue;
-    const out = toLine(JSON.parse(text.replace(/^\x1e/, '')));
+    const feature = JSON.parse(text.replace(/^\x1e/, ''));
+    const carried = routes.get(String(feature.properties?.['@id']));
+    if (carried) feature.properties.routes = carried;
+    const out = toLine(feature);
     if (!out) continue;
+    // crossings.mjs finds where these cross state lines: only ways the tiles keep.
+    if (carried && feature.geometry?.type === 'LineString') {
+      const p = feature.properties;
+      routed.push(`${JSON.stringify({ id: p['@id'], routes: carried, oneway: p.oneway ?? null, highway: p.highway ?? null, junction: p.junction ?? null, coords: feature.geometry.coordinates })}\n`);
+      if (routed.length >= 10_000) fs.appendFileSync(path.join(work, 'routed.jsonl'), routed.splice(0).join(''));
+    }
     ways++;
     if (out.v1) named++;
     for (const key of out.keys) {
@@ -72,6 +87,7 @@ async function add(work) {
     if (bytes > 256e6) flush();
   }
   flush();
+  if (routed.length) fs.appendFileSync(path.join(work, 'routed.jsonl'), routed.join(''));
   // A state with no roads means the download or the export went wrong, not an empty state.
   if (!named) throw new Error('no roads in this extract');
   console.log(`  ${named} named ways, ${ways} for v2`);

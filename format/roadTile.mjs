@@ -30,9 +30,12 @@ export const MAGIC = 'RAT2';
 export const VERSION = 2;
 export const HEADER_BYTES = 28;
 export const PER_DEGREE = 4;
-/** The OSM tags kept per way, as raw evidence for routing and clearance. */
+/**
+ * The OSM tags kept per way, as raw evidence for routing and clearance. `routes` is not an OSM way tag: it is the road route
+ * relations the way belongs to (roads/routes.mjs), `network|ref|modifier|role|direction` joined by ";". Older readers ignore it.
+ */
 export const TAGS = ['highway', 'oneway', 'junction', 'service', 'layer', 'bridge', 'tunnel', 'access', 'hgv',
-  'maxheight', 'maxwidth', 'maxweight'];
+  'maxheight', 'maxwidth', 'maxweight', 'routes'];
 
 export const tileKey = (lat, lon) => `${Math.floor(lat * PER_DEGREE)}_${Math.floor(lon * PER_DEGREE)}`;
 
@@ -388,24 +391,21 @@ export function decodeChunks(list, budget = { left: Infinity }) {
     if (!body) continue;
     for (const text of body.split('\n\n')) {
       const rows = text.split('\n'), [ref, name] = rows[0].split('\t');
-      let w = Infinity, so = Infinity, e = -Infinity, n = -Infinity;
-      const ways = rows.slice(1).map((row) => {
-        const t1 = row.indexOf('\t'), t2 = row.indexOf('\t', t1 + 1), id = row.slice(0, t1);
-        const flat = row.slice(t2 + 1).split(',').map(Number), coords = [];
-        for (let i = 0; i < flat.length; i += 2) {
-          coords.push([flat[i + 1], flat[i]]); // [lon, lat]
-          so = Math.min(so, flat[i]); n = Math.max(n, flat[i]); w = Math.min(w, flat[i + 1]); e = Math.max(e, flat[i + 1]);
-        }
-        tags.set(id, sets[Number(row.slice(t1 + 1, t2))] ?? {});
-        return { id, coords };
-      });
-      groups.push({ ref, name, ways, box: { offset: 0, length: 0, west: w, south: so, east: e, north: n } });
+      // Tags now, in row order as before; numbers and pairs when the group is first asked for (boxGroup, pairGroup): a reader by ref or name asks for one or
+      // two of a chunk's groups, and parsing every group's numbers was most of a build's decoding.
+      for (let r = 1; r < rows.length; r++) {
+        const row = rows[r], t1 = row.indexOf('\t'), t2 = row.indexOf('\t', t1 + 1);
+        tags.set(row.slice(0, t1), sets[Number(row.slice(t1 + 1, t2))] ?? {});
+      }
+      groups.push({ ref, name, rows, flats: null, ways: null, box: null });
     }
   }
+  const boxed = (x) => { if (!x.box) boxGroup(x); return x; };
+  const parsed = (x) => { if (!x.ways) pairGroup(boxed(x)); return x; };
   return {
     groupCount: () => groups.length,
-    spatial: () => groups.map((g) => g.box),
-    group: (g) => { const x = groups[g]; if (!x) throw new TileFormatError(`no group ${g}`); return { ref: x.ref, name: x.name, ways: x.ways }; },
+    spatial: () => groups.map((g) => boxed(g).box),
+    group: (g) => { const x = groups[g]; if (!x) throw new TileFormatError(`no group ${g}`); parsed(x); return { ref: x.ref, name: x.name, ways: x.ways }; },
     groupsMatching(field, test) {
       const out = [];
       groups.forEach((g, i) => { const v = field === 'ref' ? g.ref : g.name; test.lastIndex = 0; if (v && test.test(v)) out.push(i); });
@@ -413,6 +413,38 @@ export function decodeChunks(list, budget = { left: Infinity }) {
     },
     tags: (wayId) => tags.get(String(wayId)) ?? {},
   };
+}
+/*
+  A decodeChunks group in two steps, each value exactly as it was parsed up front before. The numbers and the box first (spatial(): waysNear
+  only reads the groups whose box reaches its radius), then the [lon, lat] pairs when the group itself is read: most groups of a chunk never
+  are, and their pairs were most of the decoding time and of the decoded chunks' memory.
+*/
+function boxGroup(x) {
+  let w = Infinity, so = Infinity, e = -Infinity, n = -Infinity;
+  x.flats = x.rows.slice(1).map((row) => {
+    const t1 = row.indexOf('\t'), t2 = row.indexOf('\t', t1 + 1), id = row.slice(0, t1);
+    const flat = numbers(row.slice(t2 + 1));
+    for (let i = 0; i < flat.length; i += 2) { so = Math.min(so, flat[i]); n = Math.max(n, flat[i]); w = Math.min(w, flat[i + 1]); e = Math.max(e, flat[i + 1]); }
+    return { id, flat };
+  });
+  x.box = { offset: 0, length: 0, west: w, south: so, east: e, north: n };
+  x.rows = null;
+}
+function pairGroup(x) {
+  x.ways = x.flats.map(({ id, flat }) => {
+    const coords = [];
+    for (let i = 0; i < flat.length; i += 2) coords.push([flat[i + 1], flat[i]]); // [lon, lat]
+    return { id, coords };
+  });
+  x.flats = null;
+}
+/**
+ * `text.split(',').map(Number)`, by the JSON parser where the text is a JSON number list (what the encoder writes: numbers joined by commas):
+ * the same doubles, about twice as fast. Anything else (empty, a stray format) takes the old way, so the answer is always the old one.
+ */
+function numbers(text) {
+  if (text) try { const out = JSON.parse(`[${text}]`); if (out.length && out.every((v) => typeof v === 'number')) return out; } catch { /* not a plain number list */ }
+  return text.split(',').map(Number);
 }
 
 // ---- Manifests (schema 3): a small top level, then one manifest per 2° block -----------------------------------------
