@@ -69,7 +69,8 @@ const ROADS_V2 = {
 const BOUNDARIES = {
   prefix: 'boundaries/v1', manifest: () => path.join(WORK, 'boundaries', 'manifest.json'), dir: () => path.join(WORK, 'boundaries', 'objects'),
   folders: ['objects/'],
-  objects: async (m) => [m.index, ...Object.values(m.blocks)], local: (o) => o.key.split('/').pop(),
+  // `crossings` (crossings.mjs): where numbered routes cross state lines, published with the grid it was built against.
+  objects: async (m) => [m.index, ...Object.values(m.blocks), ...(m.crossings ? [m.crossings] : [])], local: (o) => o.key.split('/').pop(),
 };
 /** Runs fn over items, at most n at a time; results in order. */
 async function pool(items, n, fn) {

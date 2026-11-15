@@ -14,7 +14,7 @@ STATES=${STATES:-"alabama alaska arizona arkansas california colorado connecticu
   ohio oklahoma oregon pennsylvania rhode-island south-carolina south-dakota tennessee texas utah vermont virginia
   washington west-virginia wisconsin wyoming"}
 WORK=${WORK:-.build}
-rm -rf "$WORK/raw" "$WORK/raw2" "$WORK/tiles" "$WORK/tiles2" "$WORK/manifest2.json" "$WORK/sources.txt" "$WORK/build.json" "$WORK/pois-raw" "$WORK/pois" "$WORK/pois.json" "$WORK/extras.jsonl" "$WORK/signs.jsonl" "$WORK/weigh-station-gaps.geojson" "$WORK/signals-raw.csv" "$WORK/signals" "$WORK/signals.json" "$WORK/names" "$WORK/names.json"
+rm -rf "$WORK/routed.jsonl" "$WORK/raw" "$WORK/raw2" "$WORK/tiles" "$WORK/tiles2" "$WORK/manifest2.json" "$WORK/sources.txt" "$WORK/build.json" "$WORK/pois-raw" "$WORK/pois" "$WORK/pois.json" "$WORK/extras.jsonl" "$WORK/signs.jsonl" "$WORK/weigh-station-gaps.geojson" "$WORK/signals-raw.csv" "$WORK/signals" "$WORK/signals.json" "$WORK/names" "$WORK/names.json"
 mkdir -p "$WORK/pbf"
 # The tags the app reads plus v2's raw evidence (format/roadTile.mjs TAGS). area_tags=false keeps closed ways
 # (roundabouts) as lines.
@@ -35,6 +35,10 @@ for state in $STATES; do
     --speed-limit 100000 --speed-time 60 -A "RouteAll roads build" -o "$pbf" \
     "https://download.geofabrik.de/north-america/us/$state-latest.osm.pbf"
   echo "$state $(osmium fileinfo -g header.option.osmosis_replication_timestamp "$pbf")" >> "$WORK/sources.txt"
+  # Road route relations: the routes each way carries and its role in each (routes.mjs), kept as the way's `routes` tag by tile.mjs.
+  osmium tags-filter "$pbf" r/route=road -R -o "$WORK/routes.pbf" --overwrite
+  osmium cat "$WORK/routes.pbf" -f opl -o - | node routes.mjs > "$WORK/routes.tsv"
+  rm -f "$WORK/routes.pbf"
   osmium tags-filter "$pbf" w/highway -o "$WORK/highways.pbf" --overwrite
   # Every highway way: tile.mjs keeps named ones for v1 and adds the unnamed truck classes for v2.
   osmium export "$WORK/highways.pbf" -c "$WORK/export.json" -f geojsonseq -x print_record_separator=false \
