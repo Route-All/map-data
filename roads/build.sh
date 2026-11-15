@@ -65,7 +65,9 @@ for state in $STATES; do
     r/route=road -o "$WORK/names.pbf" --overwrite
   osmium add-locations-to-ways "$WORK/names.pbf" -f opl -o - | python3 names.py "$state" "$WORK/names"
   # Freeway exits (exits.py): each motorway_junction node's exit number, from the same input. publish.mjs KIND=exits uploads them.
-  osmium add-locations-to-ways "$WORK/names.pbf" -f opl -o - | python3 exits.py "$state" "$WORK/exits"
+  # Never fatal: an exits failure must not stop the roads and names publish (exits.mjs finish then refuses the short set).
+  osmium add-locations-to-ways "$WORK/names.pbf" -f opl -o - | python3 exits.py "$state" "$WORK/exits" \
+    || echo "  exits: $state failed, skipped (roads and names carry on)" >&2
   rm -f "$WORK/names.pbf"
   [ -n "${KEEP_PBF:-}" ] || rm -f "$pbf"
   echo "  $((SECONDS - start)) s"
@@ -77,4 +79,4 @@ node extras.mjs "$WORK"
 node pois.mjs finish "$WORK"
 node signals.mjs finish "$WORK"
 node names.mjs finish "$WORK" "$(echo $STATES | wc -w)"
-node exits.mjs finish "$WORK" "$(echo $STATES | wc -w)"
+node exits.mjs finish "$WORK" "$(echo $STATES | wc -w)" || echo "exits: finish failed, no exits index this run (roads and names carry on)" >&2
