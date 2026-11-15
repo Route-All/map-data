@@ -6,12 +6,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-export function finish(work, expected) {
-  const dir = path.join(work, 'names');
+// exits.mjs runs the same step for the exit index (kind 'exits': <work>/exits/<ST>.json.gz → <work>/exits.json).
+export function finish(work, expected, kind = 'names') {
+  const label = kind === 'names' ? 'road-name' : kind.replace(/s$/, '');
+  const dir = path.join(work, kind);
   const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => /^[A-Z]{2}\.json\.gz$/.test(f)).sort() : [];
   // Every state build.sh read must have its file: a missing state would silently drop a whole state's names.
   // build.sh passes how many states it built. Not sources.txt: extras.mjs adds non-state sources to it.
-  if (!files.length || files.length !== expected) throw new Error(`${files.length} road-name files for ${expected} states`);
+  if (!files.length || files.length !== expected) throw new Error(`${files.length} ${label} files for ${expected} states`);
   const states = {};
   for (const f of files) {
     const bytes = fs.readFileSync(path.join(dir, f));
@@ -19,8 +21,8 @@ export function finish(work, expected) {
   }
   const builtAt = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
   const build = { buildId: builtAt.replace(/[-:]/g, ''), builtAt, states };
-  fs.writeFileSync(path.join(work, 'names.json'), JSON.stringify(build, null, 1) + '\n');
-  console.log(`road names: ${files.length} states, ${(Object.values(states).reduce((t, s) => t + s.bytes, 0) / 1e6).toFixed(1)} MB gzip`);
+  fs.writeFileSync(path.join(work, `${kind}.json`), JSON.stringify(build, null, 1) + '\n');
+  console.log(`${label}s: ${files.length} states, ${(Object.values(states).reduce((t, s) => t + s.bytes, 0) / 1e6).toFixed(1)} MB gzip`);
   return build;
 }
 
