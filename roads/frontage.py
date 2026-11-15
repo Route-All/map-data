@@ -41,7 +41,7 @@ MAIN = re.compile(r'^(motorway|trunk)$')
 LINK = re.compile(r'^(motorway|trunk)_link$')
 # What may be a frontage road: surface classes a truck drives. Not driveways or parking aisles.
 CANDIDATE = re.compile(r'^(trunk|primary|secondary|tertiary|unclassified|residential|living_street|service)$')
-SERVICE_OUT = {'driveway', 'parking_aisle', 'drive-through', 'emergency_access'}
+FRONTAGE_NAME = re.compile(r'\b(frontage|service\s+r(oa)?d|access\s+r(oa)?d)\b', re.I)
 
 def ways_of(lines, want):
     """(id, tags, node ids, [(lng, lat)]) for the way lines of an OPL stream with locations whose tags `want` accepts (judged before the nodes are read)."""
@@ -135,7 +135,8 @@ class Mains:
 def judge(mains, t, nodes, coords):
     """The frontage entry for one candidate way, or None."""
     hw = t.get('highway', '')
-    if not CANDIDATE.match(hw) or (hw == 'service' and t.get('service') in SERVICE_OUT) or t.get('area') == 'yes':
+    # A service way only when named as frontage: TX had 26,349 service ways beside freeways (median 60 m: lot aisles, station access), 212 named.
+    if not CANDIDATE.match(hw) or (hw == 'service' and not FRONTAGE_NAME.search(t.get('name') or '')) or t.get('area') == 'yes':
         return None
     if not mains.touches(coords):
         return None
