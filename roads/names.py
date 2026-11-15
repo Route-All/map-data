@@ -34,12 +34,10 @@ STATE = ABBR.get(sys.argv[1], sys.argv[1].upper()) if len(sys.argv) > 1 else '??
 OUT = sys.argv[2] if len(sys.argv) > 2 else None
 FAST = re.compile(r'^(motorway|trunk)(_link)?$')
 MAIN = re.compile(r'^(motorway|trunk)$')
-FRONTAGE_WORDS = re.compile(r'\b(frontage|(service|access)\s+(road|rd))\b', re.I)
-# A frontage road whose other name says so: Amarillo's "East Interstate Drive" (I 40) has name_1 "Interstate Highway 40 Access Road" and no
-# frontage word in `name` (TX branch rf-loop). Not frontage_road=yes alone: 20,271 TX ways carry it, and as frontage names they moved 7 of 84
-# permits on AWS (map-gaps-app-1114171546-2: Fort Worth's residential streets, Circle Road at Waco), so Dumas Drive stays out.
-def marked_frontage(t):
-    return any(FRONTAGE_WORDS.search(v) for k in NAME_KEYS for v in (t.get(k) or '').split(';'))
+FRONTAGE_WORDS = re.compile(r'\b(frontage|service\s+(road|rd))\b', re.I)
+# Not read as frontage (map-gaps, 2026-11-14, AWS against the same OSM): frontage_road=yes alone (20,271 TX ways: 7 of 84 permits worse,
+# map-gaps-app-1114171546-2), nor an "Access Road" in another name tag (Amarillo's East Interstate Drive, name_1 "Interstate Highway 40 Access
+# Road": it fixed TX e9327b90's IH-40 SFR/NFR rows but 2 of 84 got worse, map-gaps-app-1114172722-4: Fort Worth / Mansfield for 9c37e1c8).
 CELL = 0.0015  # ~150 m
 # Every tag a road's name is kept in. v1 read the first five; the rest (TIGER's name_1 / name_2, reg_name, short_name, name:en ...) and a
 # relation's own names are v2, and from those a name that only restates a designation ("STATE ROUTE 103", "NH RT 140", "I 95 (MA)") is left
@@ -363,7 +361,7 @@ for t, coords in ways.values():
         for r in refs_of(t):
             frontage[r][nm] |= cells_of(coords)
     for r, n in hits.items():
-        if n >= max(2, len(samples) // 2) and (marked_frontage(t) or nm in main_names[r] or any(m and m in nm for m in main_names[r])):
+        if n >= max(2, len(samples) // 2) and (FRONTAGE_WORDS.search(nm) or nm in main_names[r] or any(m and m in nm for m in main_names[r])):
             frontage[r][nm] |= cells_of(coords)
 
 def enc(cells):

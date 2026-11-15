@@ -186,7 +186,7 @@ test('names v3 aliases: old alignments, spelling, network shapes, business route
   assert.deepEqual(Object.keys(idx.aliases).sort(), ['I 69', 'I 75 Business', 'SR 2', 'US 117', 'US 666', 'US 70']);
 });
 
-test('names: frontage roads named so in another name tag ("Access Road"), not frontage_road=yes alone and state DOT numbers (nysdot_ref, ref:penndot) (map-gaps)', () => {
+test('names: frontage only by its own name (not frontage_road=yes, not an Access Road name_1), and state DOT numbers (nysdot_ref, ref:penndot) (map-gaps)', () => {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-gaps-'));
   const opl = [
     // Amarillo: US 87 main lanes, a frontage road named "Dumas Drive" marked frontage_road=yes, and I 40's "East Interstate Drive" whose
@@ -207,8 +207,8 @@ test('names: frontage roads named so in another name tag ("Access Road"), not fr
   execFileSync('python3', [path.join(DIR, 'names.py'), 'texas', work], { input: opl });
   const idx = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'TX.json.gz'))));
   assert.equal(idx.frontage['US 87']?.['DUMAS DRIVE'], undefined); // frontage_road=yes alone is not enough (7 of 84 worse on AWS)
-  assert.ok(idx.frontage['I 40']['EAST INTERSTATE DRIVE']);
-  assert.equal(idx.frontage['I 40']['ELM STREET'], undefined);
+  assert.equal(idx.frontage['I 40']?.['EAST INTERSTATE DRIVE'], undefined); // an Access Road name_1 alone: 2 of 84 worse on AWS
+  assert.equal(idx.frontage['I 40']?.['ELM STREET'], undefined);
   assert.deepEqual(Object.keys(idx.names['STRUNK ROAD']), ['NY 953B']);
   assert.deepEqual(Object.keys(idx.names['SNYDER ROAD']), ['SR 4017']);
   assert.deepEqual(idx.unsigned['NY 953B'], ['STRUNK ROAD']);
