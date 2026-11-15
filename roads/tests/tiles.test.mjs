@@ -119,15 +119,30 @@ test('road route relations become each member way\'s routes tag; other relations
 
 test('a route crossing a state line is placed on the line, in each direction it can be driven', async () => {
   const { buildGrid } = await import('../../format/stateBoundary.mjs');
-  const { wayCrossings } = await import('../crossings.mjs');
+  const { wayCrossings, joins, table } = await import('../crossings.mjs');
   // Two square states meeting at lon -90.
   const sq = (w, e) => [[[w, 34], [e, 34], [e, 35], [w, 35]]];
   const grid = buildGrid([{ code: 'MS', polygons: [sq(-91, -90)] }, { code: 'AL', polygons: [sq(-90, -89)] }]);
   const line = [[-90.3, 34.5], [-90.1, 34.5], [-89.8, 34.5]];
-  const two = await wayCrossings(grid, { id: 7, routes: 'US:US|72|||', oneway: null, coords: line });
+  const two = (await wayCrossings(grid, { id: 7, routes: 'US:US|72|||', oneway: null, coords: line })).crossings;
   assert.deepEqual(two.map((c) => [c.from, c.to, c.bearing]), [['MS', 'AL', 90], ['AL', 'MS', 270]]);
   assert.ok(Math.abs(two[0].at[0] + 90) < 1e-5 && two[0].at[1] === 34.5);
-  const one = await wayCrossings(grid, { id: 8, routes: 'US:I|22||forward|east', oneway: 'yes', coords: line });
+  const one = (await wayCrossings(grid, { id: 8, routes: 'US:I|22||forward|east', oneway: 'yes', coords: line })).crossings;
   assert.deepEqual(one.map((c) => [c.from, c.to, c.network, c.ref, c.direction]), [['MS', 'AL', 'US:I', '22', 'east']]);
-  assert.deepEqual(await wayCrossings(grid, { id: 9, routes: 'US:US|72|||', oneway: null, coords: [[-90.5, 34.5], [-90.2, 34.6]] }), []);
+  // A motorway is one-way unless tagged otherwise; a relation's "/" between refs is read back as ";".
+  const motorway = (await wayCrossings(grid, { id: 10, routes: 'US:US|69/77|||', oneway: null, highway: 'motorway', coords: line })).crossings;
+  assert.deepEqual(motorway.map((c) => [c.from, c.to, c.ref]), [['MS', 'AL', '69;77']]);
+  assert.deepEqual((await wayCrossings(grid, { id: 9, routes: 'US:US|72|||', oneway: null, coords: [[-90.5, 34.5], [-90.2, 34.6]] })).crossings, []);
+
+  // Split at the line (OSM keeps one relation per state): each half has no vertex across, so the join places it.
+  const ms = await wayCrossings(grid, { id: 11, routes: 'US:US|72|||;US:I|22||forward|', oneway: null, coords: [[-90.3, 34.5], [-90.0001, 34.5]] });
+  const al = await wayCrossings(grid, { id: 12, routes: 'US:US|72|||', oneway: null, coords: [[-90.0001, 34.5], [-89.8, 34.5]] });
+  const far = await wayCrossings(grid, { id: 13, routes: 'US:US|72|||', oneway: null, coords: [[-90.6, 34.5], [-90.3, 34.5]] });
+  assert.deepEqual([...ms.crossings, ...al.crossings, ...far.crossings], []);
+  const joined = table(joins([...ms.ends, ...al.ends, ...far.ends]));
+  assert.deepEqual(joined.map((c) => [c.from, c.to, c.ref, c.at[0], c.bearing]), [['AL', 'MS', '72', -90.0001, 270], ['MS', 'AL', '72', -90.0001, 90]]);
+  // One-way halves: only the way they run.
+  const fwdA = await wayCrossings(grid, { id: 14, routes: 'US:I|22||forward|', oneway: 'yes', coords: [[-90.3, 34.4], [-90.0001, 34.4]] });
+  const fwdB = await wayCrossings(grid, { id: 15, routes: 'US:I|22||forward|', oneway: 'yes', coords: [[-90.0001, 34.4], [-89.8, 34.4]] });
+  assert.deepEqual(joins([...fwdA.ends, ...fwdB.ends]).map((c) => [c.from, c.to]), [['MS', 'AL']]);
 });

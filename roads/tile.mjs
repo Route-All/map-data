@@ -69,14 +69,15 @@ async function add(work) {
     if (!text.trim()) continue;
     const feature = JSON.parse(text.replace(/^\x1e/, ''));
     const carried = routes.get(String(feature.properties?.['@id']));
-    if (carried) {
-      feature.properties.routes = carried;
-      // crossings.mjs finds where these cross state lines.
-      if (feature.geometry?.type === 'LineString') routed.push(`${JSON.stringify({ id: feature.properties['@id'], routes: carried, oneway: feature.properties.oneway ?? null, coords: feature.geometry.coordinates })}\n`);
-      if (routed.length >= 10_000) fs.appendFileSync(path.join(work, 'routed.jsonl'), routed.splice(0).join(''));
-    }
+    if (carried) feature.properties.routes = carried;
     const out = toLine(feature);
     if (!out) continue;
+    // crossings.mjs finds where these cross state lines: only ways the tiles keep.
+    if (carried && feature.geometry?.type === 'LineString') {
+      const p = feature.properties;
+      routed.push(`${JSON.stringify({ id: p['@id'], routes: carried, oneway: p.oneway ?? null, highway: p.highway ?? null, junction: p.junction ?? null, coords: feature.geometry.coordinates })}\n`);
+      if (routed.length >= 10_000) fs.appendFileSync(path.join(work, 'routed.jsonl'), routed.splice(0).join(''));
+    }
     ways++;
     if (out.v1) named++;
     for (const key of out.keys) {

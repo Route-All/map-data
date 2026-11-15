@@ -92,7 +92,10 @@ jobs:
       # numbered route crosses a state line (crossings.mjs), listed in the same manifest.
       - name: Build state boundaries and route crossings
         if: steps.source.outputs.newer == 'true'
-        run: node boundaries.mjs .build && node crossings.mjs .build
+        # A crossings failure leaves the manifest without `crossings` (the app then searches, as before) and never holds back the roads.
+        run: |
+          node boundaries.mjs .build
+          node crossings.mjs .build || echo "::warning::route crossings not built; boundaries publish without them"
 
       - name: Publish roads (v2), then boundaries
         if: steps.source.outputs.newer == 'true'
