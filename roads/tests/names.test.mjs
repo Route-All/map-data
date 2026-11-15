@@ -241,3 +241,19 @@ test('names: an old number two squares from where it runs today is the old align
   const i820 = decode(idx.aliases['I 820']['I 20']);
   assert.ok(i820.includes('3265:-9728'), 'the renumbered piece keeps its old number');
 });
+
+test('exits: finish and KIND=exits publish mirror the road names, under exits/ only', () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'exits-')), store = fs.mkdtempSync(path.join(os.tmpdir(), 'store-'));
+  fs.mkdirSync(path.join(work, 'exits'));
+  for (const st of ['NC', 'TX']) fs.writeFileSync(path.join(work, 'exits', `${st}.json.gz`), zlib.gzipSync(JSON.stringify({ exits: [[35.6, -78.4, '97', 90, 'US 70', [1], 'I 95', [2]]] })));
+  assert.throws(() => execFileSync('node', [path.join(DIR, 'exits.mjs'), 'finish', work, '3'], { stdio: 'pipe' }), /2 exit files for 3 states/);
+  execFileSync('node', [path.join(DIR, 'exits.mjs'), 'finish', work, '2']);
+  const build = JSON.parse(fs.readFileSync(path.join(work, 'exits.json'), 'utf8'));
+  assert.deepEqual(Object.keys(build.states), ['NC', 'TX']);
+  execFileSync('node', [path.join(DIR, 'publish.mjs')], { env: { ...process.env, STORE_DIR: store, WORK: work, KIND: 'exits' } });
+  const pointer = JSON.parse(fs.readFileSync(path.join(store, 'exits/current.json'), 'utf8'));
+  assert.deepEqual(pointer, { version: build.buildId, path: `exits/v1/${build.buildId}`, states: build.states });
+  const nc = fs.readFileSync(path.join(store, pointer.path, 'NC.json.gz'));
+  assert.equal(crypto.createHash('sha256').update(nc).digest('hex'), pointer.states.NC.sha256);
+  assert.deepEqual(fs.readdirSync(store).sort(), ['exits', 'locks']); // names/, roads/ … untouched
+});

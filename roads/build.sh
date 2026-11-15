@@ -64,7 +64,7 @@ for state in $STATES; do
   osmium tags-filter "$pbf" w/highway=motorway,motorway_link,trunk,trunk_link,primary,primary_link,secondary,secondary_link,tertiary,unclassified \
     r/route=road -o "$WORK/names.pbf" --overwrite
   osmium add-locations-to-ways "$WORK/names.pbf" -f opl -o - | python3 names.py "$state" "$WORK/names"
-  # Freeway exits (exits.py): each motorway_junction node's exit number, from the same input. Bench only until published (no publish.mjs KIND yet).
+  # Freeway exits (exits.py): each motorway_junction node's exit number, from the same input. publish.mjs KIND=exits uploads them.
   osmium add-locations-to-ways "$WORK/names.pbf" -f opl -o - | python3 exits.py "$state" "$WORK/exits"
   rm -f "$WORK/names.pbf"
   [ -n "${KEEP_PBF:-}" ] || rm -f "$pbf"
@@ -77,3 +77,4 @@ node extras.mjs "$WORK"
 node pois.mjs finish "$WORK"
 node signals.mjs finish "$WORK"
 node names.mjs finish "$WORK" "$(echo $STATES | wc -w)"
+node exits.mjs finish "$WORK" "$(echo $STATES | wc -w)"
