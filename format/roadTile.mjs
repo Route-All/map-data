@@ -440,7 +440,7 @@ function pairGroup(x) {
  * the same doubles, about twice as fast. Anything else (empty, a stray format) takes the old way, so the answer is always the old one.
  */
 function numbers(text) {
-  if (text) try { const out = JSON.parse(`[${text}]`); if (out.every((v) => typeof v === 'number')) return out; } catch { /* not a plain number list */ }
+  if (text) try { const out = JSON.parse(`[${text}]`); if (out.length && out.every((v) => typeof v === 'number')) return out; } catch { /* not a plain number list */ }
   return text.split(',').map(Number);
 }
 
