@@ -195,6 +195,7 @@ def add_alias(printed, on, cells):
     if a != b and cells and ref_shaped(printed) and ref_shaped(on) and not a.endswith(b) and not b.endswith(a):
         aliases[printed][on] |= cells
 
+interstate = lambda r: re.fullmatch(r'I\d+[A-Z]?', road_class(r)) is not None  # "I 820", "I 35W"; not "I 75 Business"
 def relation_ref(ref, net):
     # A relation's ref is bare in some networks ("8" in US:TX:Loop): give it its network's word.
     if re.fullmatch(r'\d+[A-Z]?', ref):
@@ -227,17 +228,23 @@ def old_targets(x, refs):
     # live number to it would read the lower road as the route, however far the route moved. Only the refs no lower than the old one take it
     # (I 42 old US 70, I 84 old I 80N, US 491 old US 666). On a freeway too: Milwaukee's WI 175 freeway is old US 41.
     return [r for r in refs if rank(r, lettered_low=True) >= rank(x)]
+# How far (grid squares) from a road carrying a number today its old_ref is left out. One square (the app's reach) let Hurst and Euless Blvd
+# in Hurst/Euless, TX (TX 10, old_ref SH 183) stand for SH-183 two squares south of today's SH-183 Airport Freeway, and the walk drove 9.5 mi
+# of them (app routing-100/ALIAS-ANALYSIS.md, 9c37e1c8).
+OLD_REACH = 2
 def off_old(x, cells):
-    # ... and even then only away from the number's pavement today: in a square within one (the app's reach) of a way or route relation that
-    # carries the old number now, it is the number moved onto a parallel road (NC's I 795 old US 117, beside US 117) or a business route beside
-    # its parent ("US 412B" old US 412). Left out there, names and aliases both. Fable review, PR #24: a direct test, so a rank that guesses
-    # wrong (two US routes) cannot tie a live number to another road beside it. Kept: I 42 old US 70 (Clayton Bypass), US 491 old US 666.
+    # ... and even then only away from the number's pavement today: in a square within OLD_REACH of a way or route relation that carries the
+    # old number now, it is the number moved onto a parallel road (NC's I 795 old US 117, beside US 117; Hurst Blvd, old SH 183, beside the
+    # Airport Freeway) or a business route beside its parent ("US 412B" old US 412). Left out there, names and aliases both. Fable review, PR #24:
+    # a direct test, so a rank that guesses wrong (two US routes) cannot tie a live number to another road beside it. Kept: I 42 old US 70
+    # (Clayton Bypass), US 491 old US 666.
     now = live.get(road_class(x))
     if not now:
         return cells
+    reach = range(-OLD_REACH, OLD_REACH + 1)
     def near(c):
         la, lo = map(int, c.split(':'))
-        return any(f'{la + dy}:{lo + dx}' in now for dy in (-1, 0, 1) for dx in (-1, 0, 1))
+        return any(f'{la + dy}:{lo + dx}' in now for dy in reach for dx in reach)
     return {c for c in cells if not near(c)}
 
 for t, coords in ways.values():
@@ -276,12 +283,16 @@ for t, members in relations:
     rs = [r for r in (relation_ref(r, net) for r in refs_of(t)) if r]
     member_ways = [ways[wid] for wid in members if wid in ways]
     # Concurrency kept only on the relation: a member way whose own ref lacks the relation's is that route too, named or not (theme 19).
+    # Not one Interstate on another's pavement: Interstate concurrencies are signed and on the ways' refs, so a relation holding another
+    # Interstate's pieces is a relation fault (Fort Worth's I 820 relation over I-20, Dallas's I 635 over I-20). Renumberings between
+    # Interstates come from old_ref / fut_ref (I 540 / I 49) and stay.
     for ref in rs:
         for wt, coords in member_ways:
             wr = refs_of(wt)
             if not any(same_ref(ref, w) for w in wr):
                 for w in wr:
-                    add_alias(ref, w, cells_of(coords))
+                    if not (interstate(ref) and interstate(w)):
+                        add_alias(ref, w, cells_of(coords))
     # The relation's old / future / official / unsigned numbers: its member ways' names, its own names, its own refs.
     # As on ways: only beside a current ref, and unsigned_ref ties refs only (its names are read from the ways).
     biz = 'Business' in net

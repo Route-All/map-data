@@ -216,3 +216,29 @@ test('names: frontage only by its own name (not frontage_road=yes, not an Access
   assert.equal(idx.names['HILL ROAD'], undefined);
   assert.equal(idx.aliases['SR 230'], undefined); // the same number as the way's own PA 230
 });
+
+test('names: an old number two squares from where it runs today is the old alignment; no relation-only tie between two Interstates (alias-walk)', () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-alias-'));
+  const opl = [
+    // Hurst/Euless, TX (9c37e1c8): today's SH-183 is the Airport Freeway (row 3283); Hurst Blvd, TX 10 with old_ref SH 183, runs two squares
+    // south (row 3281) and three (row 3280) further east. Two squares off is the old road; three is left to the app's own rule.
+    way(1, { highway: 'motorway', ref: 'TX 121;TX 183', name: 'Airport Freeway' }, line(-97.20, -97.15, 32.835)),
+    way(2, { highway: 'primary', ref: 'TX 10', old_ref: 'SH 183', name: 'West Hurst Boulevard' }, line(-97.20, -97.15, 32.815)),
+    way(3, { highway: 'primary', ref: 'TX 10', old_ref: 'SH 183', name: 'East Euless Boulevard' }, line(-97.20, -97.15, 32.805)),
+    // Fort Worth: an I 820 relation that also holds a piece of I-20 (a way refd I 20 alone) ties nothing. I-20 pieces that were I-820 before
+    // the renumbering (old_ref I 820), away from today's I-820, keep the old number: a renumbering, which the app reads only where I-820 stops.
+    way(4, { highway: 'motorway', ref: 'I 820', name: 'Southwest Loop' }, line(-97.45, -97.43, 32.75)),
+    way(5, { highway: 'motorway', ref: 'I 20', name: 'Ronald Reagan Memorial Highway' }, line(-97.43, -97.40, 32.70)),
+    rel(1, { type: 'route', route: 'road', network: 'US:I', ref: '820' }, [4, 5]),
+    way(6, { highway: 'motorway', ref: 'I 20', old_ref: 'I 820', name: 'Ronald Reagan Memorial Highway' }, line(-97.30, -97.25, 32.65)),
+  ].join('\n') + '\n';
+  execFileSync('python3', [path.join(DIR, 'names.py'), 'texas', work], { input: opl });
+  const idx = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'TX.json.gz'))));
+  const hurst = decode(idx.aliases['SH 183']['TX 10']);
+  assert.ok(!hurst.some((c) => c.startsWith('3281:')), 'no Hurst Blvd square two rows from the Airport Freeway');
+  assert.ok(hurst.some((c) => c.startsWith('3280:')), 'three rows off is kept');
+  assert.equal(idx.names['WEST HURST BOULEVARD']?.['SH 183'], undefined);
+  const i820 = decode(idx.aliases['I 820']['I 20']);
+  assert.ok(!i820.some((c) => c.startsWith('3270:')), 'the I 820 relation over I-20 ties nothing');
+  assert.ok(i820.includes('3265:-9728'), 'the renumbered piece keeps its old number');
+});
