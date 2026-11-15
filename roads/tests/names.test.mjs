@@ -185,3 +185,34 @@ test('names v3 aliases: old alignments, spelling, network shapes, business route
   assert.deepEqual(Object.keys(idx.aliases['SR 2']), ['US 41']);
   assert.deepEqual(Object.keys(idx.aliases).sort(), ['I 69', 'I 75 Business', 'SR 2', 'US 117', 'US 666', 'US 70']);
 });
+
+test('names: frontage roads OSM marks (frontage_road=yes, an "Access Road" name tag) and state DOT numbers (nysdot_ref, ref:penndot) (map-gaps)', () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-gaps-'));
+  const opl = [
+    // Amarillo: US 87 main lanes, a frontage road named "Dumas Drive" marked frontage_road=yes, and I 40's "East Interstate Drive" whose
+    // name_1 says access road; a side street beside them that says neither stays out.
+    way(1, { highway: 'motorway', ref: 'US 87;US 287', name: 'Dumas Freeway' }, line(-101.84, -101.80, 35.25)),
+    way(2, { highway: 'secondary', name: 'Dumas Drive', frontage_road: 'yes' }, line(-101.84, -101.80, 35.2505)),
+    way(3, { highway: 'motorway', ref: 'I 40' }, line(-101.84, -101.80, 35.20)),
+    way(4, { highway: 'secondary', name: 'East Interstate Drive', name_1: 'Interstate Highway 40 Access Road' }, line(-101.84, -101.80, 35.2005)),
+    way(5, { highway: 'secondary', name: 'Elm Street' }, line(-101.84, -101.80, 35.1995)),
+    // Jamestown, NY: Strunk Road carries reference route 953B only in nysdot_ref; Lancaster County, PA: Snyder Road is SR 4017 in ref:penndot,
+    // PA 283 is PennDOT's SR 0300, and a township's T number is no route.
+    way(6, { highway: 'primary', name: 'Strunk Road', nysdot_ref: '953B' }, line(-79.28, -79.27, 42.12)),
+    way(7, { highway: 'tertiary', name: 'Snyder Road', 'ref:penndot': 'SR4017' }, line(-76.55, -76.54, 40.15)),
+    way(8, { highway: 'motorway', ref: 'PA 283', 'ref:penndot': 'SR 0300' }, line(-76.60, -76.55, 40.20)),
+    way(9, { highway: 'unclassified', name: 'Hill Road', 'ref:penndot': 'T522' }, line(-76.50, -76.49, 40.10)),
+    way(10, { highway: 'primary', ref: 'PA 230', name: 'Harrisburg Pike', 'ref:penndot': 'SR0230' }, line(-76.65, -76.60, 40.10)),
+  ].join('\n') + '\n';
+  execFileSync('python3', [path.join(DIR, 'names.py'), 'texas', work], { input: opl });
+  const idx = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'TX.json.gz'))));
+  assert.ok(idx.frontage['US 87']['DUMAS DRIVE'] && idx.frontage['US 287']['DUMAS DRIVE']);
+  assert.ok(idx.frontage['I 40']['EAST INTERSTATE DRIVE']);
+  assert.equal(idx.frontage['I 40']['ELM STREET'], undefined);
+  assert.deepEqual(Object.keys(idx.names['STRUNK ROAD']), ['NY 953B']);
+  assert.deepEqual(Object.keys(idx.names['SNYDER ROAD']), ['SR 4017']);
+  assert.deepEqual(idx.unsigned['NY 953B'], ['STRUNK ROAD']);
+  assert.deepEqual(Object.keys(idx.aliases['SR 300']), ['PA 283']);
+  assert.equal(idx.names['HILL ROAD'], undefined);
+  assert.equal(idx.aliases['SR 230'], undefined); // the same number as the way's own PA 230
+});
