@@ -99,7 +99,7 @@ def other_refs(t, keys=OTHER_REF_KEYS, business=False):
         for r in (t.get(k) or '').split(';'):
             r = r.strip()
             if k in STATE_DOT_REF:
-                r = re.sub(r'^([A-Za-z]*)[ -]?0*(?=\d)', lambda m: f'{m.group(1) or STATE_DOT_REF[k]} ', r)  # "953B" -> "NY 953B", "SR0230" -> "SR 230"
+                r = re.sub(r'^([A-Za-z]*)[ -]?0*(?=\d)', lambda m: f'{m.group(1).upper() or STATE_DOT_REF[k]} ', r)  # "953B" -> "NY 953B", "SR0230" -> "SR 230"
             if k == 'unsigned_ref' and re.fullmatch(r'\d+[A-Z]?', r):
                 if business:
                     continue  # a business route's bare unsigned number is its hidden state number, not "SR 96E"
@@ -195,7 +195,6 @@ def add_alias(printed, on, cells):
     if a != b and cells and ref_shaped(printed) and ref_shaped(on) and not a.endswith(b) and not b.endswith(a):
         aliases[printed][on] |= cells
 
-interstate = lambda r: re.fullmatch(r'I\d+[A-Z]?', road_class(r)) is not None  # "I 820", "I 35W"; not "I 75 Business"
 def relation_ref(ref, net):
     # A relation's ref is bare in some networks ("8" in US:TX:Loop): give it its network's word.
     if re.fullmatch(r'\d+[A-Z]?', ref):
@@ -283,16 +282,12 @@ for t, members in relations:
     rs = [r for r in (relation_ref(r, net) for r in refs_of(t)) if r]
     member_ways = [ways[wid] for wid in members if wid in ways]
     # Concurrency kept only on the relation: a member way whose own ref lacks the relation's is that route too, named or not (theme 19).
-    # Not one Interstate on another's pavement: Interstate concurrencies are signed and on the ways' refs, so a relation holding another
-    # Interstate's pieces is a relation fault (Fort Worth's I 820 relation over I-20, Dallas's I 635 over I-20). Renumberings between
-    # Interstates come from old_ref / fut_ref (I 540 / I 49) and stay.
     for ref in rs:
         for wt, coords in member_ways:
             wr = refs_of(wt)
             if not any(same_ref(ref, w) for w in wr):
                 for w in wr:
-                    if not (interstate(ref) and interstate(w)):
-                        add_alias(ref, w, cells_of(coords))
+                    add_alias(ref, w, cells_of(coords))
     # The relation's old / future / official / unsigned numbers: its member ways' names, its own names, its own refs.
     # As on ways: only beside a current ref, and unsigned_ref ties refs only (its names are read from the ways).
     biz = 'Business' in net
