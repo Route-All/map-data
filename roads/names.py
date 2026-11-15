@@ -35,6 +35,9 @@ OUT = sys.argv[2] if len(sys.argv) > 2 else None
 FAST = re.compile(r'^(motorway|trunk)(_link)?$')
 MAIN = re.compile(r'^(motorway|trunk)$')
 FRONTAGE_WORDS = re.compile(r'\b(frontage|service\s+(road|rd))\b', re.I)
+# Not read as frontage (map-gaps, 2026-11-14, AWS against the same OSM): frontage_road=yes alone (20,271 TX ways: 7 of 84 permits worse,
+# map-gaps-app-1114171546-2), nor an "Access Road" in another name tag (Amarillo's East Interstate Drive, name_1 "Interstate Highway 40 Access
+# Road": it fixed TX e9327b90's IH-40 SFR/NFR rows but 2 of 84 got worse, map-gaps-app-1114172722-4: Fort Worth / Mansfield for 9c37e1c8).
 CELL = 0.0015  # ~150 m
 # Every tag a road's name is kept in. v1 read the first five; the rest (TIGER's name_1 / name_2, reg_name, short_name, name:en ...) and a
 # relation's own names are v2, and from those a name that only restates a designation ("STATE ROUTE 103", "NH RT 140", "I 95 (MA)") is left
@@ -76,7 +79,12 @@ def refs_of(t):
 
 # Other numbers the same pavement is printed as: renumbered (old_ref), being renumbered (fut_ref), the DOT's own (official_ref), unsigned.
 # Only a value shaped like one ref: OSM also keeps histories there ("FM 157 (old Loop 496 (old US 287))", "US-12, US-191"), which no permit prints.
-OTHER_REF_KEYS = ('old_ref', 'fut_ref', 'official_ref', 'unsigned_ref')
+# A state DOT's own number for a road, on no sign, which its permits print: New York's reference routes ("NY-953B" on Strunk Road, Jamestown:
+# NY 3389b254; OSM nysdot_ref "953B"), PennDOT's quadrant routes ("SR-4017" on Snyder Road, Lancaster County: PA 72dacb4a; OSM ref:penndot
+# "SR4017" / "SR 0230", on ~53,000 ways). Read as "NY 953B" / "SR 4017" (no leading zero), and like unsigned_ref otherwise.
+STATE_DOT_REF = {'nysdot_ref': 'NY', 'ref:penndot': 'SR'}
+OTHER_REF_KEYS = ('old_ref', 'fut_ref', 'official_ref', 'unsigned_ref') + tuple(STATE_DOT_REF)
+UNSIGNED_KEYS = ('unsigned_ref',) + tuple(STATE_DOT_REF)
 ONE_REF = re.compile(r'[A-Za-z]{1,6}[ -]?\d+[A-Za-z]?(?: (?:Business|Bus|Bypass|Byp|Alternate|Alt|Truck|Spur|Loop|Connector|Toll))?')
 # ... and only a network the app reads as one (app services/permitRoute.ts roadClassKey): it reads any other word as a state route, so
 # "Exit 1A", "Old 50", "Road 17", "NASA 1" and AR's "Hwy 14" (an old state number, beside today's AR 14) would be state routes. Fable review, PR #24.
@@ -90,6 +98,8 @@ def other_refs(t, keys=OTHER_REF_KEYS, business=False):
     for k in keys:
         for r in (t.get(k) or '').split(';'):
             r = r.strip()
+            if k in STATE_DOT_REF:
+                r = re.sub(r'^([A-Za-z]*)[ -]?0*(?=\d)', lambda m: f'{m.group(1).upper() or STATE_DOT_REF[k]} ', r)  # "953B" -> "NY 953B", "SR0230" -> "SR 230"
             if k == 'unsigned_ref' and re.fullmatch(r'\d+[A-Z]?', r):
                 if business:
                     continue  # a business route's bare unsigned number is its hidden state number, not "SR 96E"
@@ -217,17 +227,23 @@ def old_targets(x, refs):
     # live number to it would read the lower road as the route, however far the route moved. Only the refs no lower than the old one take it
     # (I 42 old US 70, I 84 old I 80N, US 491 old US 666). On a freeway too: Milwaukee's WI 175 freeway is old US 41.
     return [r for r in refs if rank(r, lettered_low=True) >= rank(x)]
+# How far (grid squares) from a road carrying a number today its old_ref is left out. One square (the app's reach) let Hurst and Euless Blvd
+# in Hurst/Euless, TX (TX 10, old_ref SH 183) stand for SH-183 two squares south of today's SH-183 Airport Freeway, and the walk drove 9.5 mi
+# of them (app routing-100/ALIAS-ANALYSIS.md, 9c37e1c8).
+OLD_REACH = 2
 def off_old(x, cells):
-    # ... and even then only away from the number's pavement today: in a square within one (the app's reach) of a way or route relation that
-    # carries the old number now, it is the number moved onto a parallel road (NC's I 795 old US 117, beside US 117) or a business route beside
-    # its parent ("US 412B" old US 412). Left out there, names and aliases both. Fable review, PR #24: a direct test, so a rank that guesses
-    # wrong (two US routes) cannot tie a live number to another road beside it. Kept: I 42 old US 70 (Clayton Bypass), US 491 old US 666.
+    # ... and even then only away from the number's pavement today: in a square within OLD_REACH of a way or route relation that carries the
+    # old number now, it is the number moved onto a parallel road (NC's I 795 old US 117, beside US 117; Hurst Blvd, old SH 183, beside the
+    # Airport Freeway) or a business route beside its parent ("US 412B" old US 412). Left out there, names and aliases both. Fable review, PR #24:
+    # a direct test, so a rank that guesses wrong (two US routes) cannot tie a live number to another road beside it. Kept: I 42 old US 70
+    # (Clayton Bypass), US 491 old US 666.
     now = live.get(road_class(x))
     if not now:
         return cells
+    reach = range(-OLD_REACH, OLD_REACH + 1)
     def near(c):
         la, lo = map(int, c.split(':'))
-        return any(f'{la + dy}:{lo + dx}' in now for dy in (-1, 0, 1) for dx in (-1, 0, 1))
+        return any(f'{la + dy}:{lo + dx}' in now for dy in reach for dx in reach)
     return {c for c in cells if not near(c)}
 
 for t, coords in ways.values():
@@ -245,12 +261,12 @@ for t, coords in ways.values():
         on, xc = (old_targets(x, rs), off_old(x, cells)) if x in olds else (rs, cells)
         if not on:
             continue
-        if x not in other_refs(t, ('unsigned_ref',)):
+        if x not in other_refs(t, UNSIGNED_KEYS):
             for n in names_of(t):
                 add_name(n, x, xc)
         for r in on:
             add_alias(x, r, xc)
-    for u in (t.get('unsigned_ref') or '').split(';'):
+    for u in (t.get('unsigned_ref') or '').split(';') + other_refs(t, tuple(STATE_DOT_REF)):
         u = u.strip()
         if re.fullmatch(r'\d+[A-Z]?', u):
             u = f'SR {u}'  # state-maintained numbers kept off the signs (PA quadrant routes, NC secondary roads) print as "SR 1002"
@@ -276,7 +292,7 @@ for t, members in relations:
     # As on ways: only beside a current ref, and unsigned_ref ties refs only (its names are read from the ways).
     biz = 'Business' in net
     xs = [x for x in (relation_ref(x, net) for x in other_refs(t, business=biz)) if x and not any(same_ref(x, r) for r in rs)] if rs else []
-    unsigned_xs = {relation_ref(x, net) for x in other_refs(t, ('unsigned_ref',), business=biz)}
+    unsigned_xs = {relation_ref(x, net) for x in other_refs(t, UNSIGNED_KEYS, business=biz)}
     olds = {relation_ref(x, net) for x in other_refs(t, ('old_ref',))}
     for x in xs:
         for wt, coords in member_ways:

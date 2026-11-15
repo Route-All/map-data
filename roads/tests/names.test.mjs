@@ -185,3 +185,59 @@ test('names v3 aliases: old alignments, spelling, network shapes, business route
   assert.deepEqual(Object.keys(idx.aliases['SR 2']), ['US 41']);
   assert.deepEqual(Object.keys(idx.aliases).sort(), ['I 69', 'I 75 Business', 'SR 2', 'US 117', 'US 666', 'US 70']);
 });
+
+test('names: frontage only by its own name (not frontage_road=yes, not an Access Road name_1), and state DOT numbers (nysdot_ref, ref:penndot) (map-gaps)', () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-gaps-'));
+  const opl = [
+    // Amarillo: US 87 main lanes, a frontage road named "Dumas Drive" marked frontage_road=yes, and I 40's "East Interstate Drive" whose
+    // name_1 says access road; a side street beside them that says neither stays out.
+    way(1, { highway: 'motorway', ref: 'US 87;US 287', name: 'Dumas Freeway' }, line(-101.84, -101.80, 35.25)),
+    way(2, { highway: 'secondary', name: 'Dumas Drive', frontage_road: 'yes' }, line(-101.84, -101.80, 35.2505)),
+    way(3, { highway: 'motorway', ref: 'I 40' }, line(-101.84, -101.80, 35.20)),
+    way(4, { highway: 'secondary', name: 'East Interstate Drive', name_1: 'Interstate Highway 40 Access Road' }, line(-101.84, -101.80, 35.2005)),
+    way(5, { highway: 'secondary', name: 'Elm Street' }, line(-101.84, -101.80, 35.1995)),
+    // Jamestown, NY: Strunk Road carries reference route 953B only in nysdot_ref; Lancaster County, PA: Snyder Road is SR 4017 in ref:penndot,
+    // PA 283 is PennDOT's SR 0300, and a township's T number is no route.
+    way(6, { highway: 'primary', name: 'Strunk Road', nysdot_ref: '953B' }, line(-79.28, -79.27, 42.12)),
+    way(7, { highway: 'tertiary', name: 'Snyder Road', 'ref:penndot': 'SR4017' }, line(-76.55, -76.54, 40.15)),
+    way(8, { highway: 'motorway', ref: 'PA 283', 'ref:penndot': 'SR 0300' }, line(-76.60, -76.55, 40.20)),
+    way(9, { highway: 'unclassified', name: 'Hill Road', 'ref:penndot': 'T522' }, line(-76.50, -76.49, 40.10)),
+    way(10, { highway: 'primary', ref: 'PA 230', name: 'Harrisburg Pike', 'ref:penndot': 'SR0230' }, line(-76.65, -76.60, 40.10)),
+  ].join('\n') + '\n';
+  execFileSync('python3', [path.join(DIR, 'names.py'), 'texas', work], { input: opl });
+  const idx = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'TX.json.gz'))));
+  assert.equal(idx.frontage['US 87']?.['DUMAS DRIVE'], undefined); // frontage_road=yes alone is not enough (7 of 84 worse on AWS)
+  assert.equal(idx.frontage['I 40']?.['EAST INTERSTATE DRIVE'], undefined); // an Access Road name_1 alone: 2 of 84 worse on AWS
+  assert.equal(idx.frontage['I 40']?.['ELM STREET'], undefined);
+  assert.deepEqual(Object.keys(idx.names['STRUNK ROAD']), ['NY 953B']);
+  assert.deepEqual(Object.keys(idx.names['SNYDER ROAD']), ['SR 4017']);
+  assert.deepEqual(idx.unsigned['NY 953B'], ['STRUNK ROAD']);
+  assert.deepEqual(Object.keys(idx.aliases['SR 300']), ['PA 283']);
+  assert.equal(idx.names['HILL ROAD'], undefined);
+  assert.equal(idx.aliases['SR 230'], undefined); // the same number as the way's own PA 230
+});
+
+test('names: an old number two squares from where it runs today is the old alignment (alias-walk)', () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-alias-'));
+  const opl = [
+    // Hurst/Euless, TX (9c37e1c8): today's SH-183 is the Airport Freeway (row 3283); Hurst Blvd, TX 10 with old_ref SH 183, runs two squares
+    // south (row 3281) and three (row 3280) further east. Two squares off is the old road; three is left to the app's own rule.
+    way(1, { highway: 'motorway', ref: 'TX 121;TX 183', name: 'Airport Freeway' }, line(-97.20, -97.15, 32.835)),
+    way(2, { highway: 'primary', ref: 'TX 10', old_ref: 'SH 183', name: 'West Hurst Boulevard' }, line(-97.20, -97.15, 32.815)),
+    way(3, { highway: 'primary', ref: 'TX 10', old_ref: 'SH 183', name: 'East Euless Boulevard' }, line(-97.20, -97.15, 32.805)),
+    // Fort Worth: I-20 pieces that were I-820 before
+    // the renumbering (old_ref I 820), away from today's I-820, keep the old number: a renumbering, which the app reads only where I-820 stops.
+    way(4, { highway: 'motorway', ref: 'I 820', name: 'Southwest Loop' }, line(-97.45, -97.43, 32.75)),
+    way(5, { highway: 'motorway', ref: 'I 20', name: 'Ronald Reagan Memorial Highway' }, line(-97.43, -97.40, 32.70)),
+    rel(1, { type: 'route', route: 'road', network: 'US:I', ref: '820' }, [4, 5]),
+    way(6, { highway: 'motorway', ref: 'I 20', old_ref: 'I 820', name: 'Ronald Reagan Memorial Highway' }, line(-97.30, -97.25, 32.65)),
+  ].join('\n') + '\n';
+  execFileSync('python3', [path.join(DIR, 'names.py'), 'texas', work], { input: opl });
+  const idx = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'TX.json.gz'))));
+  const hurst = decode(idx.aliases['SH 183']['TX 10']);
+  assert.ok(!hurst.some((c) => c.startsWith('3281:')), 'no Hurst Blvd square two rows from the Airport Freeway');
+  assert.ok(hurst.some((c) => c.startsWith('3280:')), 'three rows off is kept');
+  assert.equal(idx.names['WEST HURST BOULEVARD']?.['SH 183'], undefined);
+  const i820 = decode(idx.aliases['I 820']['I 20']);
+  assert.ok(i820.includes('3265:-9728'), 'the renumbered piece keeps its old number');
+});
