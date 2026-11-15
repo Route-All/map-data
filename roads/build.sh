@@ -14,7 +14,7 @@ STATES=${STATES:-"alabama alaska arizona arkansas california colorado connecticu
   ohio oklahoma oregon pennsylvania rhode-island south-carolina south-dakota tennessee texas utah vermont virginia
   washington west-virginia wisconsin wyoming"}
 WORK=${WORK:-.build}
-rm -rf "$WORK/raw" "$WORK/raw2" "$WORK/tiles" "$WORK/tiles2" "$WORK/manifest2.json" "$WORK/sources.txt" "$WORK/build.json" "$WORK/pois-raw" "$WORK/pois" "$WORK/pois.json" "$WORK/extras.jsonl" "$WORK/signs.jsonl" "$WORK/weigh-station-gaps.geojson" "$WORK/signals-raw.csv" "$WORK/signals" "$WORK/signals.json" "$WORK/names" "$WORK/names.json"
+rm -rf "$WORK/raw" "$WORK/raw2" "$WORK/tiles" "$WORK/tiles2" "$WORK/manifest2.json" "$WORK/sources.txt" "$WORK/build.json" "$WORK/pois-raw" "$WORK/pois" "$WORK/pois.json" "$WORK/extras.jsonl" "$WORK/signs.jsonl" "$WORK/weigh-station-gaps.geojson" "$WORK/signals-raw.csv" "$WORK/signals" "$WORK/signals.json" "$WORK/names" "$WORK/names.json" "$WORK/exits"
 mkdir -p "$WORK/pbf"
 # The tags the app reads plus v2's raw evidence (format/roadTile.mjs TAGS). area_tags=false keeps closed ways
 # (roundabouts) as lines.
@@ -64,6 +64,8 @@ for state in $STATES; do
   osmium tags-filter "$pbf" w/highway=motorway,motorway_link,trunk,trunk_link,primary,primary_link,secondary,secondary_link,tertiary,unclassified \
     r/route=road -o "$WORK/names.pbf" --overwrite
   osmium add-locations-to-ways "$WORK/names.pbf" -f opl -o - | python3 names.py "$state" "$WORK/names"
+  # Freeway exits (exits.py): each motorway_junction node's exit number, from the same input. Bench only until published (no publish.mjs KIND yet).
+  osmium add-locations-to-ways "$WORK/names.pbf" -f opl -o - | python3 exits.py "$state" "$WORK/exits"
   rm -f "$WORK/names.pbf"
   [ -n "${KEEP_PBF:-}" ] || rm -f "$pbf"
   echo "  $((SECONDS - start)) s"
