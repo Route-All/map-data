@@ -78,6 +78,9 @@ export function toPlace(feature) {
     phone: p.phone || p['contact:phone'] || null,
     parking: Number.parseInt(p['capacity:hgv'] ?? '', 10) || null,
     addr: [[p['addr:housenumber'], p['addr:street']].filter(Boolean).join(' '), p['addr:city']].filter(Boolean).join(', ') || null,
+    // The sign drivers know ("Valero" for "Base Express Valero"): the map's pin label reads it first.
+    // Only when it differs from the name, so a tile carries no "Shell"/"Shell" pairs.
+    ...(p.brand && p.brand !== name ? { brand: p.brand } : {}),
   };
 }
 
@@ -228,6 +231,7 @@ export function mergeExtras(rows, extras) {
       if (same.length) {
         const row = same[0].row;
         row.addr ??= x.addr; row.phone ??= x.phone; row.hours ??= x.hours; row.name ||= x.name; row.src ??= 'osm+atp';
+        if (x.brand && x.brand !== row.name) row.brand ??= x.brand;
         matched++;
       } else if (!near(x, 150, ['truck_stop']).length) { push(x); added++; }
       continue;
