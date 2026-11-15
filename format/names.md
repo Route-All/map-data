@@ -26,7 +26,8 @@ file whose size or SHA-256 differs from the pointer.
   is only a designation ("LOOP 335", and from the tags added in v2 also "STATE ROUTE 103", "I 95 (MA)") is not a key: the app
   parses those itself.
 - `frontage[ref][NAME]`: squares where a non-freeway road beside that ref's main lanes has that name: named Frontage / Service Road /
-  Access Road (in any name tag), with a main-lane name, carrying the ref itself, or marked `frontage_road=yes` (Amarillo's "Dumas Drive").
+  Access Road (in any name tag: Amarillo's "East Interstate Drive" is name_1 "Interstate Highway 40 Access Road"), with a main-lane name,
+  or carrying the ref itself. `frontage_road=yes` alone is not read (20,271 TX ways; as frontage names they moved 7 of 84 permits).
 - `unsigned[ref]`: names of refs that exist only as `unsigned_ref`, or as a state DOT's own number: `nysdot_ref` ("953B" read as "NY 953B")
   and `ref:penndot` ("SR0230" read as "SR 230"), which permits print and no sign carries.
 - `aliases[printed ref][map ref]`: squares where pavement the map refs as `map ref` is also `printed ref`, so a permit that prints
