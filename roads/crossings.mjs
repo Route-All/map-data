@@ -49,11 +49,15 @@ export async function wayCrossings(grid, way) {
   const pts = way.coords, out = [], ends = [];
   if (pts.length < 2) return { crossings: out, ends };
   const es = entries(way), id = Number(way.id);
-  let i = 0, a = null, first = null;
+  let i = 0, a = null, first = null, margin;
   for (; i < pts.length && !(a = await stateOf(grid, pts[i])); i++);
+  // A way with no point clear of the line's 30 m margin still lies in a state: the exact polygon says which. Kansas City's I-435 eastbound is
+  // split at State Line Road and its next node is 22 m into Missouri (way 1295019164), so that way had no state, its end at the line made no
+  // join, and the table held I-435's southern crossing out of Missouri but not into it.
+  if (!a) { margin = 0; for (i = 0; i < pts.length && !(a = await stateOf(grid, pts[i], 0)); i++); }
   first = a;
   for (let j = i + 1; j < pts.length; j++) {
-    const b = await stateOf(grid, pts[j]);
+    const b = await stateOf(grid, pts[j], margin);
     if (!b) continue;
     if (b !== a) {
       let lo = pts[i], hi = pts[j];
