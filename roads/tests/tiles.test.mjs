@@ -145,4 +145,7 @@ test('a route crossing a state line is placed on the line, in each direction it 
   const fwdA = await wayCrossings(grid, { id: 14, routes: 'US:I|22||forward|', oneway: 'yes', coords: [[-90.3, 34.4], [-90.0001, 34.4]] });
   const fwdB = await wayCrossings(grid, { id: 15, routes: 'US:I|22||forward|', oneway: 'yes', coords: [[-90.0001, 34.4], [-89.8, 34.4]] });
   assert.deepEqual(joins([...fwdA.ends, ...fwdB.ends]).map((c) => [c.from, c.to]), [['MS', 'AL']]);
+  // ...and a half too short to leave the line's 30 m margin (18 m here: Kansas City's I-435 eastbound at State Line Road) still has a state.
+  const shortB = await wayCrossings(grid, { id: 16, routes: 'US:I|22||forward|', oneway: 'yes', coords: [[-90.0001, 34.4], [-89.9998, 34.4]] });
+  assert.deepEqual(table([...shortB.crossings, ...joins([...fwdA.ends, ...shortB.ends])]).map((c) => [c.from, c.to, c.ref]), [['MS', 'AL', '22']]);
 });

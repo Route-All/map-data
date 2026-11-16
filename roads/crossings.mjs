@@ -49,11 +49,19 @@ export async function wayCrossings(grid, way) {
   const pts = way.coords, out = [], ends = [];
   if (pts.length < 2) return { crossings: out, ends };
   const es = entries(way), id = Number(way.id);
-  let i = 0, a = null, first = null;
+  let i = 0, a = null, first = null, margin;
   for (; i < pts.length && !(a = await stateOf(grid, pts[i])); i++);
+  // A way with no point clear of the line's 30 m margin still lies in a state: the exact polygon says which. Kansas City's I-435 eastbound is
+  // split at State Line Road and its next node is 22 m into Missouri (way 1295019164), so that way had no state, its end at the line made no
+  // join, and the table held I-435's southern crossing out of Missouri but not into it.
+  // Only a SHORT way (under 60 m): a route mapped along the line itself (US 71 on State Line Avenue, Texarkana) also lies within the margin, and
+  // read point by point against the exact polygon it would flip state at every node and make crossings that are not there (Fable review).
+  const metres = (p, q) => { const k = Math.PI / 180, x = (q[0] - p[0]) * k * Math.cos(((p[1] + q[1]) / 2) * k), y = (q[1] - p[1]) * k; return 6371e3 * Math.hypot(x, y); };
+  const length = pts.reduce((t, p, k) => (k ? t + metres(pts[k - 1], p) : 0), 0);
+  if (!a && length < 60) { margin = 0; for (i = 0; i < pts.length && !(a = await stateOf(grid, pts[i], 0)); i++); }
   first = a;
   for (let j = i + 1; j < pts.length; j++) {
-    const b = await stateOf(grid, pts[j]);
+    const b = await stateOf(grid, pts[j], margin);
     if (!b) continue;
     if (b !== a) {
       let lo = pts[i], hi = pts[j];

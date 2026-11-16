@@ -65,8 +65,11 @@ for state in $STATES; do
     --geometry-types=point -o - | node signals.mjs add "$WORK"
   rm -f "$WORK/signals.pbf"
   # Road names (names.py): every name a numbered road goes by, so a permit's printed numbers read on named pavement.
+  # ...and a way of any class that carries a state DOT's own number (names.py STATE_DOT_REF): PennDOT's quadrant routes are often mapped
+  # residential. Mount Pleasant Road in Mount Joy Township is SR 4010 (ref:penndot, way 11949186) and residential, so the permit that starts on
+  # "SR 4010" (PA 72dacb4a) found no name for it. Pennsylvania 2026-11-15: 237 more names, 11 more unsigned numbers; New York none.
   osmium tags-filter "$pbf" w/highway=motorway,motorway_link,trunk,trunk_link,primary,primary_link,secondary,secondary_link,tertiary,unclassified \
-    r/route=road -o "$WORK/names.pbf" --overwrite
+    w/ref:penndot w/nysdot_ref r/route=road -o "$WORK/names.pbf" --overwrite
   osmium add-locations-to-ways "$WORK/names.pbf" -f opl -o - | python3 names.py "$state" "$WORK/names"
   # Freeway exits (exits.py): each motorway_junction node's exit number, from the same input. publish.mjs KIND=exits uploads them.
   # Never fatal: an exits failure must not stop the roads and names publish (exits.mjs finish then refuses the short set).

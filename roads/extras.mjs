@@ -123,7 +123,11 @@ async function getJson(url) {
 // One broken spider in a run (Pilot Flying J's file was empty in the 2026-10-17 run) must not stop the build or
 // drop the chain: each spider takes the newest of the last few runs that has it above its floor.
 const ATP_HISTORY = 'https://data.alltheplaces.xyz/runs/history.json';
-const ATP_RUNS_BACK = 4;
+// Twelve runs (three months), not four: Casey's file came back cut off mid-JSON in the runs of 2026-10-17, 10-24, 10-31 and 11-07 (1.0-2.4 MB of
+// 2.8, no closing bracket), so once 11-07 was the latest run the last good one (10-10) fell out of a four-run window and the whole Roads build
+// stopped here on 2026-11-16 (run 43915444451): no road tiles, names or boundaries were published. A store list three months old is still a
+// store list; a chain missing from every one of twelve runs still stops the build.
+const ATP_RUNS_BACK = 12;
 
 async function atp() {
   const latest = await getJson(ATP_LATEST);
