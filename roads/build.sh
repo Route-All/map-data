@@ -43,8 +43,9 @@ for state in $STATES; do
   # Every highway way: tile.mjs keeps named ones for v1 and adds the unnamed truck classes for v2.
   osmium export "$WORK/highways.pbf" -c "$WORK/export.json" -f geojsonseq -x print_record_separator=false \
     --geometry-types=linestring -o - | node tile.mjs add "$WORK"
-  # Frontage roads (frontage.py): every surface way alongside a freeway's main lanes, whatever its name. Bench only until published (no publish.mjs KIND yet).
-  python3 frontage.py "$state" "$WORK/frontage" "$WORK/highways.pbf"
+  # Frontage roads (frontage.py): every surface way alongside a freeway's main lanes, whatever its name. publish.mjs KIND=frontage uploads them.
+  # Never fatal, as the exits: frontage.mjs finish then refuses the short set and the roads and names carry on.
+  python3 frontage.py "$state" "$WORK/frontage" "$WORK/highways.pbf" || echo "  frontage: $state failed, skipped (roads and names carry on)" >&2
   rm -f "$WORK/highways.pbf"
   osmium tags-filter "$pbf" nwr/amenity=fuel,weighbridge,parking,car_wash nwr/highway=rest_area,services \
     -o "$WORK/places-full.pbf" --overwrite
@@ -89,3 +90,4 @@ node pois.mjs finish "$WORK"
 node signals.mjs finish "$WORK"
 node names.mjs finish "$WORK" "$(echo $STATES | wc -w)"
 node exits.mjs finish "$WORK" "$(echo $STATES | wc -w)" || echo "exits: finish failed, no exits index this run (roads and names carry on)" >&2
+node frontage.mjs finish "$WORK" "$(echo $STATES | wc -w)" || echo "frontage: finish failed, no frontage index this run (roads and names carry on)" >&2
