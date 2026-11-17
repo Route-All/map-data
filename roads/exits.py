@@ -9,7 +9,7 @@ Why (2026-11-15): permits print the exit to leave a freeway by ("Take Exit #97 T
 walk picked an exit by printed miles alone: NC 16ed9e62 left I-95 by exit 95, 2.3 mi past the printed exit 97. tags-filter keeps the tagged nodes
 of the ways it keeps, so the junction nodes of names.py's motorway / trunk ways are in its input already.
 
-  exits: [lat, lng, ref, heading, to, main way ids, main ref, ramp way ids], one per junction node with a ref:
+  exits: [lat, lng, ref, heading, to, main way ids, main ref, ramp way ids, old ref?], one per junction node with a ref (old ref only where OSM tags one):
     heading   bearing (0-360, whole degrees) of the one-way main lanes through the node, the carriageway the exit leaves; null on a two-way road.
     to        the node's exit_to, else its destination, else the destination of a ramp that starts there; null when none.
     main ...  the motorway / trunk ways through the node and the first of their refs ("I 95").
@@ -88,7 +88,11 @@ def build(lines):
             break
         to = t.get('exit_to') or t.get('destination') or next((w[1].get('destination') for w in ramps if w[1].get('destination')), None)
         ref = next((r.strip() for w in main for r in (w[1].get('ref') or '').split(';') if r.strip()), None)
-        out.append([round(y, 6), round(x, 6), t['ref'].strip(), heading, to, sorted(w[0] for w in main), ref, sorted(w[0] for w in ramps)])
+        row = [round(y, 6), round(x, 6), t['ref'].strip(), heading, to, sorted(w[0] for w in main), ref, sorted(w[0] for w in ramps)]
+        # The number the exit had before a renumbering (old_ref): Texas renumbered I-27's exits in 2025 (Lubbock's exit 8 is 538) and permits still print
+        # the old ones. Appended only where tagged, so a reader of the eight fields is unchanged.
+        if (t.get('old_ref') or '').strip(): row.append(t['old_ref'].strip())
+        out.append(row)
     out.sort(key=lambda e: (e[0], e[1], e[2]))
     return out
 
