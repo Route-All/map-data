@@ -137,8 +137,8 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           CLOUDFLARE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_PURGE_TOKEN }}
         run: |
-          [ -f .build/exits.json ] && KIND=exits node publish.mjs
-          [ -f .build/frontage.json ] && KIND=frontage node publish.mjs
+          [ -f .build/exits.json ] && KIND=exits node publish.mjs || echo "::warning::exits publish failed"
+          [ -f .build/frontage.json ] && KIND=frontage node publish.mjs || echo "::warning::frontage publish failed"
 
       # Proves THIS run went live, not just that some pointer exists. The query string skips the
       # edge cache. Reads only the public domain.

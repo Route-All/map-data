@@ -45,7 +45,7 @@ for state in $STATES; do
     --geometry-types=linestring -o - | node tile.mjs add "$WORK"
   # Frontage roads (frontage.py): every surface way alongside a freeway's main lanes, whatever its name. publish.mjs KIND=frontage uploads them.
   # Never fatal, as the exits: frontage.mjs finish then refuses the short set and the roads and names carry on.
-  python3 frontage.py "$state" "$WORK/frontage" "$WORK/highways.pbf" || echo "  frontage: $state failed, skipped (roads and names carry on)" >&2
+  timeout 20m python3 frontage.py "$state" "$WORK/frontage" "$WORK/highways.pbf" || echo "  frontage: $state failed, skipped (roads and names carry on)" >&2
   rm -f "$WORK/highways.pbf"
   osmium tags-filter "$pbf" nwr/amenity=fuel,weighbridge,parking,car_wash nwr/highway=rest_area,services \
     -o "$WORK/places-full.pbf" --overwrite
