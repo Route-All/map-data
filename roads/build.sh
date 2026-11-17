@@ -14,7 +14,7 @@ STATES=${STATES:-"alabama alaska arizona arkansas california colorado connecticu
   ohio oklahoma oregon pennsylvania rhode-island south-carolina south-dakota tennessee texas utah vermont virginia
   washington west-virginia wisconsin wyoming"}
 WORK=${WORK:-.build}
-rm -rf "$WORK/routed.jsonl" "$WORK/raw" "$WORK/raw2" "$WORK/tiles" "$WORK/tiles2" "$WORK/manifest2.json" "$WORK/sources.txt" "$WORK/build.json" "$WORK/pois-raw" "$WORK/pois" "$WORK/pois.json" "$WORK/extras.jsonl" "$WORK/signs.jsonl" "$WORK/weigh-station-gaps.geojson" "$WORK/signals-raw.csv" "$WORK/signals" "$WORK/signals.json" "$WORK/names" "$WORK/names.json" "$WORK/exits"
+rm -rf "$WORK/routed.jsonl" "$WORK/raw" "$WORK/raw2" "$WORK/tiles" "$WORK/tiles2" "$WORK/manifest2.json" "$WORK/sources.txt" "$WORK/build.json" "$WORK/pois-raw" "$WORK/pois" "$WORK/pois.json" "$WORK/extras.jsonl" "$WORK/signs.jsonl" "$WORK/weigh-station-gaps.geojson" "$WORK/signals-raw.csv" "$WORK/signals" "$WORK/signals.json" "$WORK/names" "$WORK/names.json" "$WORK/exits" "$WORK/frontage" "$WORK/frontage.json"
 mkdir -p "$WORK/pbf"
 # The tags the app reads plus v2's raw evidence (format/roadTile.mjs TAGS). area_tags=false keeps closed ways
 # (roundabouts) as lines.
@@ -43,6 +43,9 @@ for state in $STATES; do
   # Every highway way: tile.mjs keeps named ones for v1 and adds the unnamed truck classes for v2.
   osmium export "$WORK/highways.pbf" -c "$WORK/export.json" -f geojsonseq -x print_record_separator=false \
     --geometry-types=linestring -o - | node tile.mjs add "$WORK"
+  # Frontage roads (frontage.py): every surface way alongside a freeway's main lanes, whatever its name. publish.mjs KIND=frontage uploads them.
+  # Never fatal, as the exits: frontage.mjs finish then refuses the short set and the roads and names carry on.
+  timeout 20m python3 frontage.py "$state" "$WORK/frontage" "$WORK/highways.pbf" || echo "  frontage: $state failed, skipped (roads and names carry on)" >&2
   rm -f "$WORK/highways.pbf"
   osmium tags-filter "$pbf" nwr/amenity=fuel,weighbridge,parking,car_wash nwr/highway=rest_area,services \
     -o "$WORK/places-full.pbf" --overwrite
@@ -87,3 +90,4 @@ node pois.mjs finish "$WORK"
 node signals.mjs finish "$WORK"
 node names.mjs finish "$WORK" "$(echo $STATES | wc -w)"
 node exits.mjs finish "$WORK" "$(echo $STATES | wc -w)" || echo "exits: finish failed, no exits index this run (roads and names carry on)" >&2
+node frontage.mjs finish "$WORK" "$(echo $STATES | wc -w)" || echo "frontage: finish failed, no frontage index this run (roads and names carry on)" >&2
