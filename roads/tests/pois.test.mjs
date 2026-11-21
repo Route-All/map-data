@@ -25,6 +25,13 @@ test('classifies what a trucker searches for', () => {
   assert.equal(toPlace(at({ amenity: 'restaurant' })), null);
 });
 
+test('a place keeps its brand for the map label, only when the name says something else', () => {
+  assert.equal(toPlace(at({ amenity: 'fuel', name: 'Base Express Valero', brand: 'Valero' })).brand, 'Valero');
+  assert.equal('brand' in toPlace(at({ amenity: 'fuel', name: 'Shell', brand: 'Shell' })), false);
+  assert.equal('brand' in toPlace(at({ amenity: 'fuel', brand: 'Chevron' })), false); // the brand IS the name
+  assert.equal('brand' in toPlace(at({ amenity: 'fuel', name: 'Corner Gas' })), false);
+});
+
 test('a building outline becomes one pin at its middle', () => {
   const ring = [[-117.2, 32.7], [-117.1, 32.7], [-117.1, 32.8], [-117.2, 32.8]];
   const p = toPlace(at({ amenity: 'fuel' }, { type: 'Polygon', coordinates: [ring] }));
