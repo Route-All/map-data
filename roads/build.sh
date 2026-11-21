@@ -33,7 +33,7 @@ for state in $STATES; do
   # left to hang the job until GitHub kills it hours later.
   [ -n "${KEEP_PBF:-}" ] && [ -s "$pbf" ] || curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 \
     --speed-limit 100000 --speed-time 60 -A "RouteAll roads build" -o "$pbf" \
-    "https://download.geofabrik.de/north-america/us/$state-latest.osm.pbf"
+    "https://download.geofabrik.de/north-america/us/$state/$state-latest.osm.pbf"
   echo "$state $(osmium fileinfo -g header.option.osmosis_replication_timestamp "$pbf")" >> "$WORK/sources.txt"
   # Road route relations: the routes each way carries and its role in each (routes.mjs), kept as the way's `routes` tag by tile.mjs.
   osmium tags-filter "$pbf" r/route=road -R -o "$WORK/routes.pbf" --overwrite
