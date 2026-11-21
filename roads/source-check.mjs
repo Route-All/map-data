@@ -1,7 +1,7 @@
 // Has Geofabrik published a newer extract than the live road build? The daily Roads job asks
 // first and builds only when one has, so a new extract goes live within a day.
 //   node source-check.mjs [--force]     prints newer=true|false (for $GITHUB_OUTPUT); reasons go to stderr
-// Compares each state's replication time on Geofabrik (<state>-updates/state.txt) with the time the
+// Compares each state's replication time on Geofabrik (<state>/updates/state.txt; Geofabrik moved each state into its own folder on 2026-11-19) with the time the
 // live build recorded for it (roads/current.json sourceDates, from the same header).
 const ORIGIN = 'https://tiles.routeall.app';
 const GEOFABRIK = 'https://download.geofabrik.de/north-america/us';
@@ -16,7 +16,7 @@ else {
   const stateTxt = async (state) => {
     for (let attempt = 1; ; attempt++) {
       try {
-        const res = await fetch(`${GEOFABRIK}/${state}-updates/state.txt`, { headers: { 'user-agent': 'RouteAll roads build' }, signal: AbortSignal.timeout(20_000) });
+        const res = await fetch(`${GEOFABRIK}/${state}/updates/state.txt`, { headers: { 'user-agent': 'RouteAll roads build' }, signal: AbortSignal.timeout(20_000) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return await res.text();
       } catch (e) {
