@@ -283,6 +283,14 @@ test('names: a retired state number far from any road carrying it today names it
   assert.deepEqual(decode(sd.aliases['US 16B']['US 16 Truck']), ['4405:-10316']);
   assert.ok(sd.names['ELK VALE ROAD']['US 16B']);
   assert.equal(sd.names['FAR AWAY ROAD']['US 16B'], undefined);
+  // NM 9 east of the Luna county line is OSM's "A003 County Road" with no ref (app trip 416a9284: 36.8 mi read as off the permit). Only in its box.
+  const nm9 = run('new-mexico', [
+    way(1, { highway: 'secondary', name: 'A003 County Road' }, line(-107.297, -106.685, 31.79)),
+    way(2, { highway: 'secondary', name: 'A003 County Road' }, line(-108.20, -108.15, 32.50)),
+  ]);
+  assert.deepEqual(nm9.unsigned['NM 9'], ['A003 COUNTY ROAD']);
+  const squares = decode(nm9.names['A003 COUNTY ROAD']['NM 9']);
+  assert.ok(squares.includes('3179:-10700') && !squares.some((c) => c.startsWith('3250:')));
 });
 
 test('names: a numbered street named in alt_name on part of a road names the whole joined road of that name and ref (app trip 32591c0f)', () => {
