@@ -284,3 +284,21 @@ test('names: a retired state number far from any road carrying it today names it
   assert.ok(sd.names['ELK VALE ROAD']['US 16B']);
   assert.equal(sd.names['FAR AWAY ROAD']['US 16B'], undefined);
 });
+
+test('names: a numbered street named in alt_name on part of a road names the whole joined road of that name and ref (app trip 32591c0f)', () => {
+  // Nodes shared end to end: Hassert Boulevard (CH 66) from IL-59 east; only the east way says alt_name 111th Street. A Hassert way that
+  // does not join them, and a memorial alt_name, are left alone.
+  const w = (id, tags, nodes) => `w${id} v1 dV c0 t2026-01-01T00:00:00Z i0 u T${Object.entries(tags).map(([k, v]) => `${k}=${String(v).replace(/ /g, '%20%')}`).join(',')} N${nodes.map(([n, x, y]) => `n${n}x${x}y${y}`).join(',')}`;
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
+  execFileSync('python3', [path.join(DIR, 'names.py'), 'illinois', path.join(work, 'names')], { input: [
+    w(1, { highway: 'secondary', name: 'Hassert Boulevard', ref: 'CH 66' }, [[1, -88.2047, 41.6807], [2, -88.195, 41.6808]]),
+    w(2, { highway: 'secondary', name: 'Hassert Boulevard', ref: 'CH 66', alt_name: 'Veterans Memorial Bridge' }, [[2, -88.195, 41.6808], [3, -88.185, 41.6809]]),
+    w(3, { highway: 'secondary', name: 'Hassert Boulevard', ref: 'CH 66', alt_name: '111th Street' }, [[3, -88.185, 41.6809], [4, -88.1675, 41.6814]]),
+    w(4, { highway: 'secondary', name: 'Hassert Boulevard', ref: 'CH 66' }, [[9, -87.50, 41.6807], [10, -87.49, 41.6807]]),
+  ].join('\n') + '\n' });
+  const idx = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'names', 'IL.json.gz'))));
+  const cells = decode(idx.names['111TH STREET']['CH 66']);
+  assert.ok(cells.includes('4168:-8821') && cells.includes('4168:-8817')); // from IL-59 to the east end
+  assert.ok(!cells.includes('4168:-8750'));
+  assert.deepEqual(decode(idx.names['VETERANS MEMORIAL BRIDGE']['CH 66']), ['4168:-8820', '4168:-8819']); // its own way only
+});

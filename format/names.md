@@ -31,6 +31,8 @@ file whose size or SHA-256 differs from the pointer.
 - A retired state number on a road that carries no number now, at least 50 squares (~35 mi) from any road carrying that number today, is
   read as an unsigned number too (`names` and `unsigned`): a state route handed to a city that the state's permits still print (Clovis, NM:
   Brady Avenue is old_ref "NM 270"). Nearer than that it is the old alignment beside the new road, and stays out.
+- A numbered street's name in another name tag (`alt_name` "111th Street" on part of Hassert Boulevard, CH 66) is carried by every way of
+  that name and ref joined to it end to end: a grid street keeps its number for its length. Only numbered streets.
 - Hand-kept ties (`roads/names-extra.json`): a number a state's permits print that no OSM tag ties to the pavement, each checked against the
   state DOT's own data and read only inside its box. `on` refs get the printed ref as an alias and their names carry it (South Dakota's
   "US 16B" is OSM's US 16 Truck; PennDOT's "SR 3160" is I 376 BUS; TDOT's "US 45E Business" runs 1.95 mi of US 45E north of the Martin

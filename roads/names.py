@@ -142,6 +142,7 @@ def road_class(r):
     p = 'I' if p in ('I', 'IH') else p if p in ('US', 'FM', 'RM', 'PR') else 'CR' if p in ('CR', 'CO', 'CH', 'CTH', 'CNTY', 'CSAH') else 'S'
     return f'{p}{n}{w or ""}'
 ways = {}          # id -> (tags, coords)
+way_nodes = {}     # id -> node ids, for named ways with a ref (numbered-street names, below)
 relations = []     # (tags, member way ids)
 for line in sys.stdin:
     if not line or line[0] not in 'wr':
@@ -157,6 +158,8 @@ for line in sys.stdin:
             if m:
                 coords.append((float(m.group(1)), float(m.group(2))))
         ways[oid] = (t, coords)
+        if t.get('name') and t.get('ref'):
+            way_nodes[oid] = [nd.split('x')[0] for nd in (fields.get('N') or '').split(',') if nd]
     elif t.get('route') == 'road':
         members = [int(m[1:].split('@')[0]) for m in (fields.get('M') or '').split(',') if m.startswith('w')]
         relations.append((t, members))
@@ -334,6 +337,44 @@ for t, members in relations:
         for n in names_of(t, kept=()):
             for _, coords in member_ways:
                 add_name(n, ref, cells_of(coords))
+
+# A numbered street's other name runs as far as the road does. OSM tags "111th Street" as the alt_name of Hassert Boulevard (CH 66, Will County,
+# IL) on the mile east of Book Road only; the permits print "111th St" for all of it to IL-59 (app trip 32591c0f). The ways of one name and one
+# ref that join end to end are one road: a numbered-street name any of them carries in another name tag is carried by all of them. Only a
+# numbered street ("111TH STREET", "WEST 79TH STREET"): a grid street keeps its number for its length, a bridge's memorial name does not.
+NUMBERED_STREET = re.compile(r'\b\d+(?:ST|ND|RD|TH)\b')
+roads_by = defaultdict(list)  # (name, ref) -> way ids
+for wid in way_nodes:
+    t = ways[wid][0]
+    for r in refs_of(t):
+        roads_by[(t['name'].strip().upper(), r)].append(wid)
+for (nm, r), wids in roads_by.items():
+    if len(wids) < 2:
+        continue
+    at = defaultdict(list)
+    for wid in wids:
+        for nd in way_nodes[wid]:
+            at[nd].append(wid)
+    seen = set()
+    for start in wids:
+        if start in seen:
+            continue
+        part, todo = [], [start]
+        seen.add(start)
+        while todo:
+            w = todo.pop()
+            part.append(w)
+            for nd in way_nodes[w]:
+                for o in at[nd]:
+                    if o not in seen:
+                        seen.add(o)
+                        todo.append(o)
+        other = {n.strip().upper() for w in part for k in NAME_KEYS[1:] for n in (ways[w][0].get(k) or '').split(';')}
+        other = {n for n in other if n and n != nm and NUMBERED_STREET.search(n) and not is_designation(n)}
+        if other:
+            cells = set().union(*(cells_of(ways[w][1]) for w in part))
+            for n in other:
+                add_name(n, r, cells)
 
 # Hand-kept ties (names-extra.json): a number a state's permits print that no OSM tag ties to the pavement, each checked against the state
 # DOT's own data and read only inside its box. `on`: ways carrying one of those refs are the printed number too (an alias, and their names
