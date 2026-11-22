@@ -35,7 +35,10 @@ export const PER_DEGREE = 4;
  * relations the way belongs to (roads/routes.mjs), `network|ref|modifier|role|direction` joined by ";". Older readers ignore it.
  */
 export const TAGS = ['highway', 'oneway', 'junction', 'service', 'layer', 'bridge', 'tunnel', 'access', 'hgv',
-  'maxheight', 'maxwidth', 'maxweight', 'routes'];
+  'maxheight', 'maxwidth', 'maxweight', 'routes',
+  // A road's number before a renumbering (OSM old_ref). Permits still print retired numbers (NM 270, AL CR 83 and CR 85,
+  // 2026-11-21); a reader takes it only where no way carries the printed number as its ref. Older readers ignore it.
+  'old_ref'];
 
 export const tileKey = (lat, lon) => `${Math.floor(lat * PER_DEGREE)}_${Math.floor(lon * PER_DEGREE)}`;
 
