@@ -28,6 +28,13 @@ file whose size or SHA-256 differs from the pointer.
 - `frontage[ref][NAME]`: squares where a non-freeway road beside that ref's main lanes has that name.
 - `unsigned[ref]`: names of refs that exist only as `unsigned_ref`, or as a state DOT's own number: `nysdot_ref` ("953B" read as "NY 953B")
   and `ref:penndot` ("SR0230" read as "SR 230"), which permits print and no sign carries.
+- A retired state number on a road that carries no number now, at least 50 squares (~35 mi) from any road carrying that number today, is
+  read as an unsigned number too (`names` and `unsigned`): a state route handed to a city that the state's permits still print (Clovis, NM:
+  Brady Avenue is old_ref "NM 270"). Nearer than that it is the old alignment beside the new road, and stays out.
+- Hand-kept ties (`roads/names-extra.json`): a number a state's permits print that no OSM tag ties to the pavement, each checked against the
+  state DOT's own data and read only inside its box. `on` refs get the printed ref as an alias and their names carry it (South Dakota's
+  "US 16B" is OSM's US 16 Truck; PennDOT's "SR 3160" is I 376 BUS; TDOT's "US 45E Business" runs 1.95 mi of US 45E north of the Martin
+  bypass); `names` are streets with no ref that are the number (`unsigned`).
 - `aliases[printed ref][map ref]`: squares where pavement the map refs as `map ref` is also `printed ref`, so a permit that prints
   one is read on pavement labelled the other. Sources: a way's or route relation's `old_ref` / `fut_ref` / `official_ref` /
   `unsigned_ref` against its `ref` (NC's Clayton Bypass: `"US 70": { "I 42": … }`; I-69 at Cleveland, TX: `"I 69": { "US 59": … }`),

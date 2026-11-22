@@ -1,0 +1,11 @@
+{
+  "about": "Numbers a state's permits print for pavement OpenStreetMap refs or names another way, and no OSM tag ties the two. Each entry is checked against the state DOT's own open data and read only inside its box [south, west, north, east]. `on`: the OSM refs that pavement carries (the printed ref becomes their alias there, and their names carry it). `names`: UPPERCASE street names with no ref at all that are the printed number there. Read by names.py; format/names.md.",
+  "entries": [
+    { "state": "SD", "ref": "US 16B", "on": ["US 16 Truck"], "box": [43.85, -103.75, 44.15, -103.10],
+      "source": "SDDOT prints the Rapid City truck bypass (Elk Vale Rd, Catron Blvd) and Hill City's as US16B; OSM relations 1944291 / 1944290 are US 16 Truck" },
+    { "state": "PA", "ref": "SR 3160", "on": ["I 376 BUS", "I 376 Business"], "box": [40.455, -80.29, 40.535, -80.19],
+      "source": "PennDOT RMS: SR 3160 is Business I-376 (Airport Parkway / Beaver Valley Expressway, Allegheny County), printed 'CARGO RD (SR3160)'; OSM has no ref:penndot there" },
+    { "state": "TN", "ref": "US 45E Business", "on": ["US 45E"], "box": [36.3699, -88.86, 36.40, -88.845],
+      "source": "TDOT prints SR 372 north of the Martin bypass as US-45E-BR up to SR 43 (1.95 mi); OSM: ref US 45E with unsigned_ref SR 372, the business route's own state number" }
+  ]
+}

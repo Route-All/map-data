@@ -257,3 +257,30 @@ test('exits: finish and KIND=exits publish mirror the road names, under exits/ o
   assert.equal(crypto.createHash('sha256').update(nc).digest('hex'), pointer.states.NC.sha256);
   assert.deepEqual(fs.readdirSync(store).sort(), ['exits', 'locks']); // names/, roads/ … untouched
 });
+
+test('names: a retired state number far from any road carrying it today names its old street; hand-kept ties are read inside their box (keyed regression)', () => {
+  const run = (state, opl) => { const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
+    execFileSync('python3', [path.join(DIR, 'names.py'), state, path.join(work, 'names')], { input: opl.join('\n') + '\n' });
+    return JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'names', fs.readdirSync(path.join(work, 'names'))[0])))); };
+  // Clovis, NM: Brady Avenue is old NM 270 and carries no number now; Forest Road 270 is 200 mi away. A road beside today's NM 18 stays out.
+  const nm = run('new-mexico', [
+    way(1, { highway: 'tertiary', name: 'West Brady Avenue', old_ref: 'NM 270' }, line(-103.2669, -103.2317, 34.3903)),
+    way(2, { highway: 'unclassified', ref: 'FR 270', name: 'Cerro Pelado Road' }, line(-106.61, -106.56, 35.77)),
+    way(3, { highway: 'primary', ref: 'NM 18' }, line(-103.20, -103.15, 32.70)),
+    way(4, { highway: 'tertiary', name: 'Old Lovington Highway', old_ref: 'NM 18' }, line(-103.20, -103.15, 32.80)),
+    way(5, { highway: 'tertiary', name: 'Old Mother Road', old_ref: 'US 66' }, line(-108.20, -108.15, 35.50)),
+  ]);
+  assert.deepEqual(nm.unsigned['NM 270'], ['WEST BRADY AVENUE']);
+  assert.ok(decode(nm.names['WEST BRADY AVENUE']['NM 270']).includes('3439:-10325'));
+  assert.equal(nm.unsigned['NM 18'], undefined);
+  assert.equal(nm.unsigned['US 66'], undefined);
+  // South Dakota prints Rapid City's truck bypass "US-16B"; OSM refs it US 16 Truck. Only in the entry's box.
+  const sd = run('south-dakota', [
+    way(1, { highway: 'trunk', ref: 'US 16 Truck;SD 79', name: 'Elk Vale Road' }, line(-103.1512, -103.1512, 44.05)),
+    way(2, { highway: 'trunk', ref: 'US 16 Truck', name: 'Far Away Road' }, line(-98.00, -97.95, 44.05)),
+  ]);
+  assert.deepEqual(Object.keys(sd.aliases['US 16B']), ['US 16 Truck']);
+  assert.deepEqual(decode(sd.aliases['US 16B']['US 16 Truck']), ['4405:-10316']);
+  assert.ok(sd.names['ELK VALE ROAD']['US 16B']);
+  assert.equal(sd.names['FAR AWAY ROAD']['US 16B'], undefined);
+});

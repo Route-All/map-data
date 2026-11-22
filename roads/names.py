@@ -246,6 +246,27 @@ def off_old(x, cells):
         return any(f'{la + dy}:{lo + dx}' in now for dy in reach for dx in reach)
     return {c for c in cells if not near(c)}
 
+# A retired number on a road with no number now, far from any road that carries the number today: a state route handed to a city, which the
+# state's permits still print. Clovis, NM: Brady Avenue, Thomas Street and Dr Martin Luther King Jr Boulevard are old_ref "NM 270", NMDOT
+# prints "NM-270" for them (trip dd62f70e) and New Mexico has no NM 270 now. Read as an unsigned number: the street's names carry it. Within
+# FAR squares of the number's pavement today it is the old alignment beside the new road, as before: left out.
+FAR = 50  # grid squares, ~35 mi
+live_far = defaultdict(set)
+for k, cs in live.items():
+    for c in cs:
+        la, lo = map(int, c.split(':'))
+        live_far[k].add((la // FAR, lo // FAR))
+def retired(olds, cells):
+    out = []
+    for x in olds:
+        if rank(x) != 2:
+            continue  # a state's own number; a retired US route (US 66, US 80 west of Dallas) is printed by no permit
+        now = live_far.get(road_class(x), ())
+        blocks = {(int(c.split(':')[0]) // FAR, int(c.split(':')[1]) // FAR) for c in cells}
+        if not any((a + da, b + db) in now for a, b in blocks for da in (-1, 0, 1) for db in (-1, 0, 1)):
+            out.append(x)
+    return out
+
 for t, coords in ways.values():
     rs = refs_of(t)
     cells = cells_of(coords)
@@ -266,7 +287,7 @@ for t, coords in ways.values():
                 add_name(n, x, xc)
         for r in on:
             add_alias(x, r, xc)
-    for u in (t.get('unsigned_ref') or '').split(';') + other_refs(t, tuple(STATE_DOT_REF)):
+    for u in (t.get('unsigned_ref') or '').split(';') + other_refs(t, tuple(STATE_DOT_REF)) + ([] if rs else retired(olds, cells)):
         u = u.strip()
         if re.fullmatch(r'\d+[A-Z]?', u):
             u = f'SR {u}'  # state-maintained numbers kept off the signs (PA quadrant routes, NC secondary roads) print as "SR 1002"
@@ -313,6 +334,30 @@ for t, members in relations:
         for n in names_of(t, kept=()):
             for _, coords in member_ways:
                 add_name(n, ref, cells_of(coords))
+
+# Hand-kept ties (names-extra.json): a number a state's permits print that no OSM tag ties to the pavement, each checked against the state
+# DOT's own data and read only inside its box. `on`: ways carrying one of those refs are the printed number too (an alias, and their names
+# carry it); `names`: ways of that name are it (an unsigned number). Written as given: these are not OSM values to be judged by shape.
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'names-extra.json')) as f:
+    EXTRA = [e for e in json.load(f)['entries'] if e['state'] == STATE]
+for e in EXTRA:
+    s, w, n, ea = e['box']
+    for t, coords in ways.values():
+        inside = [c for c in coords if s <= c[1] <= n and w <= c[0] <= ea]
+        if not inside:
+            continue
+        cells = cells_of(inside)
+        for on in e.get('on', ()):
+            for r in refs_of(t):
+                if norm(r) == norm(on):
+                    aliases[e['ref']][r] |= cells
+                    for nm in names_of(t):
+                        add_name(nm, e['ref'], cells)
+        mine = {x.strip().upper() for k in NAME_KEYS for x in (t.get(k) or '').split(';')}
+        for nm in e.get('names', ()):
+            if nm in mine:
+                add_name(nm, e['ref'], cells)
+                unsigned[e['ref']].add(nm)
 
 # Frontage: non-freeway ways beside a ref's main lanes.
 grid = defaultdict(list)  # cell -> [(ref, bearing)]
