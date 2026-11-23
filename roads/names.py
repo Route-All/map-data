@@ -301,6 +301,35 @@ for t, coords in ways.values():
                     if n.strip():
                         unsigned[u].add(n.strip().upper())
 
+# A county's number the map keeps only as another name: Wallahatchie Road, Montgomery County, AL is name_1 "County Road 83" and Old Carter Hill
+# Road "County Road 85" (TIGER's second name), neither with a ref, and ALDOT prints "CO RD 83", "CO RD 85" (app trip 93a7830d). Read as an unsigned
+# number: the street's name carries "CR 83". Only a way with no ref (beside a ref, TIGER's name_1 often names ANOTHER route on the pavement), and
+# not one already named for a county number (the app reads that name itself). build.sh keeps these ways whatever their class.
+COUNTY_NAME = re.compile(r'(?:COUNTY|CO\.?|CNTY) (?:ROAD|RD|HIGHWAY|HWY|ROUTE|RTE) (\d+[A-Z]?)')
+for t, coords in ways.values():
+    nm = (t.get('name') or '').strip().upper()
+    if refs_of(t) or not nm or COUNTY_NAME.fullmatch(nm):
+        continue
+    for k in ('alt_name', 'name_1', 'name_2'):
+        for n in (t.get(k) or '').split(';'):
+            m = COUNTY_NAME.fullmatch(n.strip().upper())
+            if m:
+                add_name(nm, f'CR {m.group(1)}', cells_of(coords))
+                unsigned[f'CR {m.group(1)}'].add(nm)
+
+# A bypass the route itself now runs on: WYDOT prints Douglas's west bypass "WY-59 BY PASS" (app trip d40b2cbf); OSM refs it plain "WY 59" (the
+# road through town is old_ref WY 59) and only TIGER's name remembers it, "State Highway 59 (Bypass)". Such a way is "<its ref> Bypass" too:
+# only the ref whose number TIGER's bypass name carries, and never a ref that is already a bypass, business or other lesser route.
+TIGER_BYPASS = re.compile(r'.*?\b(\d+[A-Z]?) \(Bypass\)', re.I)
+for t, coords in ways.values():
+    tiger = ':'.join(t.get(k) or '' for k in ('tiger:name_base', 'tiger:name_base_1', 'tiger:name_base_2'))
+    if '(bypass)' not in tiger.lower():
+        continue
+    nums = {m.group(1).upper() for m in (TIGER_BYPASS.fullmatch(p.strip()) for p in tiger.split(':')) if m}
+    for r in refs_of(t):
+        if number(r) in nums and rank(r) >= 2:
+            add_alias(f'{canon(r)} Bypass', r, cells_of(coords))
+
 for t, members in relations:
     net = t.get('network') or ''
     rs = [r for r in (relation_ref(r, net) for r in refs_of(t)) if r]
@@ -379,6 +408,7 @@ for (nm, r), wids in roads_by.items():
 # Hand-kept ties (names-extra.json): a number a state's permits print that no OSM tag ties to the pavement, each checked against the state
 # DOT's own data and read only inside its box. `on`: ways carrying one of those refs are the printed number too (an alias, and their names
 # carry it); `names`: ways of that name are it (an unsigned number). Written as given: these are not OSM values to be judged by shape.
+# `name` with `on` (and `highway`, the ways' class): a NAME the permits print for those ways (IDOT's "I-80 OVERFLOW LANE" is the US 6 ramp).
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'names-extra.json')) as f:
     EXTRA = [e for e in json.load(f)['entries'] if e['state'] == STATE]
 for e in EXTRA:
@@ -390,10 +420,14 @@ for e in EXTRA:
         cells = cells_of(inside)
         for on in e.get('on', ()):
             for r in refs_of(t):
-                if norm(r) == norm(on):
-                    aliases[e['ref']][r] |= cells
-                    for nm in names_of(t):
-                        add_name(nm, e['ref'], cells)
+                if norm(r) != norm(on) or t.get('highway') != e.get('highway', t.get('highway')):
+                    continue
+                if 'name' in e:  # a printed NAME for that pavement, not a number
+                    add_name(e['name'], r, cells)
+                    continue
+                aliases[e['ref']][r] |= cells
+                for nm in names_of(t):
+                    add_name(nm, e['ref'], cells)
         mine = {x.strip().upper() for k in NAME_KEYS for x in (t.get(k) or '').split(';')}
         for nm in e.get('names', ()):
             if nm in mine:

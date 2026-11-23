@@ -33,10 +33,16 @@ file whose size or SHA-256 differs from the pointer.
   Brady Avenue is old_ref "NM 270"). Nearer than that it is the old alignment beside the new road, and stays out.
 - A numbered street's name in another name tag (`alt_name` "111th Street" on part of Hassert Boulevard, CH 66) is carried by every way of
   that name and ref joined to it end to end: a grid street keeps its number for its length. Only numbered streets.
+- A county's number kept only as another name (`alt_name` / `name_1` / `name_2` "County Road 83" on Wallahatchie Road, Montgomery County,
+  AL) on a way with no ref is read as an unsigned number too ("CR 83"; `names` and `unsigned`). Ways of any class: build.sh keeps them.
+- A way whose TIGER name is its number's bypass (`tiger:name_base` "State Highway 59 (Bypass)" on ref "WY 59", Douglas, WY) gets
+  "<ref> Bypass" as an alias: the route now runs on its old bypass and the state's permits still print "WY-59 BY PASS".
 - Hand-kept ties (`roads/names-extra.json`): a number a state's permits print that no OSM tag ties to the pavement, each checked against the
   state DOT's own data and read only inside its box. `on` refs get the printed ref as an alias and their names carry it (South Dakota's
   "US 16B" is OSM's US 16 Truck; PennDOT's "SR 3160" is I 376 BUS; TDOT's "US 45E Business" runs 1.95 mi of US 45E north of the Martin
   bypass); `names` are streets with no ref that are the number (`unsigned`).
+  An entry with `name` instead of `ref` gives the `on` ways of its `highway` class a NAME the permits print (IDOT's "I-80 OVERFLOW LANE"
+  is the unnamed US 6 ramp chain from Torrence Avenue to I-80 at Lansing): `names[NAME][map ref]`.
 - `aliases[printed ref][map ref]`: squares where pavement the map refs as `map ref` is also `printed ref`, so a permit that prints
   one is read on pavement labelled the other. Sources: a way's or route relation's `old_ref` / `fut_ref` / `official_ref` /
   `unsigned_ref` against its `ref` (NC's Clayton Bypass: `"US 70": { "I 42": … }`; I-69 at Cleveland, TX: `"I 69": { "US 59": … }`),

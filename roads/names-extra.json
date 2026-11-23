@@ -1,5 +1,5 @@
 {
-  "about": "Numbers a state's permits print for pavement OpenStreetMap refs or names another way, and no OSM tag ties the two. Each entry is checked against the state DOT's own open data and read only inside its box [south, west, north, east]. `on`: the OSM refs that pavement carries (the printed ref becomes their alias there, and their names carry it). `names`: UPPERCASE street names with no ref at all that are the printed number there. Read by names.py; format/names.md.",
+  "about": "Numbers a state's permits print for pavement OpenStreetMap refs or names another way, and no OSM tag ties the two. Each entry is checked against the state DOT's own open data and read only inside its box [south, west, north, east]. `on`: the OSM refs that pavement carries (the printed ref becomes their alias there, and their names carry it). `names`: UPPERCASE street names with no ref at all that are the printed number there. `name` (instead of `ref`) with `on` and `highway`: a NAME the permits print for the ways of that class carrying those refs. Read by names.py; format/names.md.",
   "entries": [
     { "state": "SD", "ref": "US 16B", "on": ["US 16 Truck"], "box": [43.85, -103.75, 44.15, -103.10],
       "source": "SDDOT prints the Rapid City truck bypass (Elk Vale Rd, Catron Blvd) and Hill City's as US16B; OSM relations 1944291 / 1944290 are US 16 Truck" },
@@ -8,6 +8,8 @@
     { "state": "TN", "ref": "US 45E Business", "on": ["US 45E"], "box": [36.3699, -88.86, 36.40, -88.845],
       "source": "TDOT prints SR 372 north of the Martin bypass as US-45E-BR up to SR 43 (1.95 mi); OSM: ref US 45E with unsigned_ref SR 372, the business route's own state number" },
     { "state": "NM", "ref": "NM 9", "names": ["A003 COUNTY ROAD"], "box": [31.78, -107.30, 31.83, -106.68],
-      "source": "NMDOT: NM 9 runs on from the Luna county line to NM 136 at Santa Teresa (37 mi); OSM keeps ref NM 9 only west of the line and names the Dona Ana County stretch 'A003 County Road' (the county's own number), no ref" }
+      "source": "NMDOT: NM 9 runs on from the Luna county line to NM 136 at Santa Teresa (37 mi); OSM keeps ref NM 9 only west of the line and names the Dona Ana County stretch 'A003 County Road' (the county's own number), no ref" },
+    { "state": "IL", "name": "I-80 OVERFLOW LANE", "on": ["US 6"], "highway": "motorway_link", "box": [41.5765, -87.5600, 41.5800, -87.5470],
+      "source": "IDOT permits print 'Turn left on Ramp toward US-6 E / I-80 E / I-94 E, then go on I-80 OVERFLOW LANE' (0.5 mi) between US-6/IL-83 Torrence Ave and I-80 at Lansing: OSM's motorway_link chain there, ref US 6, no name (ways 51805040 to 61431956)" }
   ]
 }

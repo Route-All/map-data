@@ -310,3 +310,36 @@ test('names: a numbered street named in alt_name on part of a road names the who
   assert.ok(!cells.includes('4168:-8750'));
   assert.deepEqual(decode(idx.names['VETERANS MEMORIAL BRIDGE']['CH 66']), ['4168:-8820', '4168:-8819']); // its own way only
 });
+
+test('names: a county number kept as another name, a bypass only TIGER remembers, and a hand-kept printed name (map-fixes-1122)', () => {
+  const run = (state, opl) => { const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
+    execFileSync('python3', [path.join(DIR, 'names.py'), state, path.join(work, 'names')], { input: opl.join('\n') + '\n' });
+    return JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'names', fs.readdirSync(path.join(work, 'names'))[0])))); };
+  // Montgomery County, AL (app trip 93a7830d): Wallahatchie Road is name_1 "County Road 83", no ref, residential. A way that has a ref keeps
+  // TIGER's other county number out, and a way already named for its county number is the app's to read.
+  const al = run('alabama', [
+    way(1, { highway: 'residential', name: 'Wallahatchie Road', name_1: 'County Road 83' }, line(-86.1025, -86.0468, 32.305)),
+    way(2, { highway: 'primary', ref: 'AL 110', name: 'Vaughn Road', name_1: 'County Road 12' }, line(-86.20, -86.15, 32.34)),
+    way(3, { highway: 'tertiary', name: 'County Road 40', name_1: 'County Road 44' }, line(-86.20, -86.15, 32.10)),
+  ]);
+  assert.deepEqual(al.unsigned, { 'CR 83': ['WALLAHATCHIE ROAD'] });
+  assert.ok(decode(al.names['WALLAHATCHIE ROAD']['CR 83']).includes('3230:-8611'));
+  assert.equal(al.names['VAUGHN ROAD']['CR 12'], undefined);
+  // Douglas, WY (app trip d40b2cbf): the west bypass is ref "WY 59", TIGER "State Highway 59 (Bypass)". WY 59 elsewhere is not a bypass, and
+  // TIGER's bypass of another number, or on a route that is already a lesser one, ties nothing.
+  const wy = run('wyoming', [
+    way(1, { highway: 'trunk', ref: 'WY 59', name: 'State Highway 59', 'tiger:name_base': 'State Highway 59 (Bypass):State Highway 93' }, line(-105.4066, -105.3750, 42.775)),
+    way(2, { highway: 'trunk', ref: 'WY 59', name: 'State Highway 59' }, line(-105.37, -105.30, 42.85)),
+    way(3, { highway: 'primary', ref: 'WY 93', 'tiger:name_base': 'State Highway 59 (Bypass)' }, line(-105.50, -105.45, 42.70)),
+    way(4, { highway: 'primary', ref: 'US 20 Business', 'tiger:name_base': 'US Hwy 20 (Bypass)' }, line(-106.40, -106.35, 42.86)),
+  ]);
+  assert.deepEqual(Object.keys(wy.aliases), ['WY 59 Bypass']);
+  assert.deepEqual(decode(wy.aliases['WY 59 Bypass']['WY 59']), ['4277:-10541', '4277:-10540', '4277:-10539', '4277:-10538']);
+  // Lansing, IL (app trips 1ea1ed18, bfc2bf20): IDOT's "I-80 OVERFLOW LANE" is the US 6 ramp chain off Torrence Avenue. Only that class, in the box.
+  const il = run('illinois', [
+    way(1, { highway: 'motorway_link', ref: 'US 6' }, line(-87.5588, -87.5476, 41.5777)),
+    way(2, { highway: 'primary', ref: 'US 6;IL 83', name: 'Torrence Avenue' }, line(-87.5590, -87.5590, 41.5785)),
+    way(3, { highway: 'motorway_link', ref: 'US 6' }, line(-87.70, -87.69, 41.60)),
+  ]);
+  assert.deepEqual(il.names['I-80 OVERFLOW LANE'], { 'US 6': '4157,-8756 1' });
+});
