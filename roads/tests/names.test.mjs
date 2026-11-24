@@ -257,3 +257,89 @@ test('exits: finish and KIND=exits publish mirror the road names, under exits/ o
   assert.equal(crypto.createHash('sha256').update(nc).digest('hex'), pointer.states.NC.sha256);
   assert.deepEqual(fs.readdirSync(store).sort(), ['exits', 'locks']); // names/, roads/ … untouched
 });
+
+test('names: a retired state number far from any road carrying it today names its old street; hand-kept ties are read inside their box (keyed regression)', () => {
+  const run = (state, opl) => { const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
+    execFileSync('python3', [path.join(DIR, 'names.py'), state, path.join(work, 'names')], { input: opl.join('\n') + '\n' });
+    return JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'names', fs.readdirSync(path.join(work, 'names'))[0])))); };
+  // Clovis, NM: Brady Avenue is old NM 270 and carries no number now; Forest Road 270 is 200 mi away. A road beside today's NM 18 stays out.
+  const nm = run('new-mexico', [
+    way(1, { highway: 'tertiary', name: 'West Brady Avenue', old_ref: 'NM 270' }, line(-103.2669, -103.2317, 34.3903)),
+    way(2, { highway: 'unclassified', ref: 'FR 270', name: 'Cerro Pelado Road' }, line(-106.61, -106.56, 35.77)),
+    way(3, { highway: 'primary', ref: 'NM 18' }, line(-103.20, -103.15, 32.70)),
+    way(4, { highway: 'tertiary', name: 'Old Lovington Highway', old_ref: 'NM 18' }, line(-103.20, -103.15, 32.80)),
+    way(5, { highway: 'tertiary', name: 'Old Mother Road', old_ref: 'US 66' }, line(-108.20, -108.15, 35.50)),
+  ]);
+  assert.deepEqual(nm.unsigned['NM 270'], ['WEST BRADY AVENUE']);
+  assert.ok(decode(nm.names['WEST BRADY AVENUE']['NM 270']).includes('3439:-10325'));
+  assert.equal(nm.unsigned['NM 18'], undefined);
+  assert.equal(nm.unsigned['US 66'], undefined);
+  // South Dakota prints Rapid City's truck bypass "US-16B"; OSM refs it US 16 Truck. Only in the entry's box.
+  const sd = run('south-dakota', [
+    way(1, { highway: 'trunk', ref: 'US 16 Truck;SD 79', name: 'Elk Vale Road' }, line(-103.1512, -103.1512, 44.05)),
+    way(2, { highway: 'trunk', ref: 'US 16 Truck', name: 'Far Away Road' }, line(-98.00, -97.95, 44.05)),
+  ]);
+  assert.deepEqual(Object.keys(sd.aliases['US 16B']), ['US 16 Truck']);
+  assert.deepEqual(decode(sd.aliases['US 16B']['US 16 Truck']), ['4405:-10316']);
+  assert.ok(sd.names['ELK VALE ROAD']['US 16B']);
+  assert.equal(sd.names['FAR AWAY ROAD']['US 16B'], undefined);
+  // NM 9 east of the Luna county line is OSM's "A003 County Road" with no ref (app trip 416a9284: 36.8 mi read as off the permit). Only in its box.
+  const nm9 = run('new-mexico', [
+    way(1, { highway: 'secondary', name: 'A003 County Road' }, line(-107.297, -106.685, 31.79)),
+    way(2, { highway: 'secondary', name: 'A003 County Road' }, line(-108.20, -108.15, 32.50)),
+  ]);
+  assert.deepEqual(nm9.unsigned['NM 9'], ['A003 COUNTY ROAD']);
+  const squares = decode(nm9.names['A003 COUNTY ROAD']['NM 9']);
+  assert.ok(squares.includes('3179:-10700') && !squares.some((c) => c.startsWith('3250:')));
+});
+
+test('names: a numbered street named in alt_name on part of a road names the whole joined road of that name and ref (app trip 32591c0f)', () => {
+  // Nodes shared end to end: Hassert Boulevard (CH 66) from IL-59 east; only the east way says alt_name 111th Street. A Hassert way that
+  // does not join them, and a memorial alt_name, are left alone.
+  const w = (id, tags, nodes) => `w${id} v1 dV c0 t2026-01-01T00:00:00Z i0 u T${Object.entries(tags).map(([k, v]) => `${k}=${String(v).replace(/ /g, '%20%')}`).join(',')} N${nodes.map(([n, x, y]) => `n${n}x${x}y${y}`).join(',')}`;
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
+  execFileSync('python3', [path.join(DIR, 'names.py'), 'illinois', path.join(work, 'names')], { input: [
+    w(1, { highway: 'secondary', name: 'Hassert Boulevard', ref: 'CH 66' }, [[1, -88.2047, 41.6807], [2, -88.195, 41.6808]]),
+    w(2, { highway: 'secondary', name: 'Hassert Boulevard', ref: 'CH 66', alt_name: 'Veterans Memorial Bridge' }, [[2, -88.195, 41.6808], [3, -88.185, 41.6809]]),
+    w(3, { highway: 'secondary', name: 'Hassert Boulevard', ref: 'CH 66', alt_name: '111th Street' }, [[3, -88.185, 41.6809], [4, -88.1675, 41.6814]]),
+    w(4, { highway: 'secondary', name: 'Hassert Boulevard', ref: 'CH 66' }, [[9, -87.50, 41.6807], [10, -87.49, 41.6807]]),
+  ].join('\n') + '\n' });
+  const idx = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'names', 'IL.json.gz'))));
+  const cells = decode(idx.names['111TH STREET']['CH 66']);
+  assert.ok(cells.includes('4168:-8821') && cells.includes('4168:-8817')); // from IL-59 to the east end
+  assert.ok(!cells.includes('4168:-8750'));
+  assert.deepEqual(decode(idx.names['VETERANS MEMORIAL BRIDGE']['CH 66']), ['4168:-8820', '4168:-8819']); // its own way only
+});
+
+test('names: a county number kept as another name, a bypass only TIGER remembers, and a hand-kept printed name (map-fixes-1122)', () => {
+  const run = (state, opl) => { const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
+    execFileSync('python3', [path.join(DIR, 'names.py'), state, path.join(work, 'names')], { input: opl.join('\n') + '\n' });
+    return JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'names', fs.readdirSync(path.join(work, 'names'))[0])))); };
+  // Montgomery County, AL (app trip 93a7830d): Wallahatchie Road is name_1 "County Road 83", no ref, residential. A way that has a ref keeps
+  // TIGER's other county number out, and a way already named for its county number is the app's to read.
+  const al = run('alabama', [
+    way(1, { highway: 'residential', name: 'Wallahatchie Road', name_1: 'County Road 83' }, line(-86.1025, -86.0468, 32.305)),
+    way(2, { highway: 'primary', ref: 'AL 110', name: 'Vaughn Road', name_1: 'County Road 12' }, line(-86.20, -86.15, 32.34)),
+    way(3, { highway: 'tertiary', name: 'County Road 40', name_1: 'County Road 44' }, line(-86.20, -86.15, 32.10)),
+  ]);
+  assert.deepEqual(al.unsigned, { 'CR 83': ['WALLAHATCHIE ROAD'] });
+  assert.ok(decode(al.names['WALLAHATCHIE ROAD']['CR 83']).includes('3230:-8611'));
+  assert.equal(al.names['VAUGHN ROAD']['CR 12'], undefined);
+  // Douglas, WY (app trip d40b2cbf): the west bypass is ref "WY 59", TIGER "State Highway 59 (Bypass)". WY 59 elsewhere is not a bypass, and
+  // TIGER's bypass of another number, or on a route that is already a lesser one, ties nothing.
+  const wy = run('wyoming', [
+    way(1, { highway: 'trunk', ref: 'WY 59', name: 'State Highway 59', 'tiger:name_base': 'State Highway 59 (Bypass):State Highway 93' }, line(-105.4066, -105.3750, 42.775)),
+    way(2, { highway: 'trunk', ref: 'WY 59', name: 'State Highway 59' }, line(-105.37, -105.30, 42.85)),
+    way(3, { highway: 'primary', ref: 'WY 93', 'tiger:name_base': 'State Highway 59 (Bypass)' }, line(-105.50, -105.45, 42.70)),
+    way(4, { highway: 'primary', ref: 'US 20 Business', 'tiger:name_base': 'US Hwy 20 (Bypass)' }, line(-106.40, -106.35, 42.86)),
+  ]);
+  assert.deepEqual(Object.keys(wy.aliases), ['WY 59 Bypass']);
+  assert.deepEqual(decode(wy.aliases['WY 59 Bypass']['WY 59']), ['4277:-10541', '4277:-10540', '4277:-10539', '4277:-10538']);
+  // Lansing, IL (app trips 1ea1ed18, bfc2bf20): IDOT's "I-80 OVERFLOW LANE" is the US 6 ramp chain off Torrence Avenue. Only that class, in the box.
+  const il = run('illinois', [
+    way(1, { highway: 'motorway_link', ref: 'US 6' }, line(-87.5588, -87.5476, 41.5777)),
+    way(2, { highway: 'primary', ref: 'US 6;IL 83', name: 'Torrence Avenue' }, line(-87.5590, -87.5590, 41.5785)),
+    way(3, { highway: 'motorway_link', ref: 'US 6' }, line(-87.70, -87.69, 41.60)),
+  ]);
+  assert.deepEqual(il.names['I-80 OVERFLOW LANE'], { 'US 6': '4157,-8756 1' });
+});

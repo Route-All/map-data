@@ -142,6 +142,7 @@ def road_class(r):
     p = 'I' if p in ('I', 'IH') else p if p in ('US', 'FM', 'RM', 'PR') else 'CR' if p in ('CR', 'CO', 'CH', 'CTH', 'CNTY', 'CSAH') else 'S'
     return f'{p}{n}{w or ""}'
 ways = {}          # id -> (tags, coords)
+way_nodes = {}     # id -> node ids, for named ways with a ref (numbered-street names, below)
 relations = []     # (tags, member way ids)
 for line in sys.stdin:
     if not line or line[0] not in 'wr':
@@ -157,6 +158,8 @@ for line in sys.stdin:
             if m:
                 coords.append((float(m.group(1)), float(m.group(2))))
         ways[oid] = (t, coords)
+        if t.get('name') and t.get('ref'):
+            way_nodes[oid] = [nd.split('x')[0] for nd in (fields.get('N') or '').split(',') if nd]
     elif t.get('route') == 'road':
         members = [int(m[1:].split('@')[0]) for m in (fields.get('M') or '').split(',') if m.startswith('w')]
         relations.append((t, members))
@@ -246,6 +249,27 @@ def off_old(x, cells):
         return any(f'{la + dy}:{lo + dx}' in now for dy in reach for dx in reach)
     return {c for c in cells if not near(c)}
 
+# A retired number on a road with no number now, far from any road that carries the number today: a state route handed to a city, which the
+# state's permits still print. Clovis, NM: Brady Avenue, Thomas Street and Dr Martin Luther King Jr Boulevard are old_ref "NM 270", NMDOT
+# prints "NM-270" for them (trip dd62f70e) and New Mexico has no NM 270 now. Read as an unsigned number: the street's names carry it. Within
+# FAR squares of the number's pavement today it is the old alignment beside the new road, as before: left out.
+FAR = 50  # grid squares, ~35 mi
+live_far = defaultdict(set)
+for k, cs in live.items():
+    for c in cs:
+        la, lo = map(int, c.split(':'))
+        live_far[k].add((la // FAR, lo // FAR))
+def retired(olds, cells):
+    out = []
+    for x in olds:
+        if rank(x) != 2:
+            continue  # a state's own number; a retired US route (US 66, US 80 west of Dallas) is printed by no permit
+        now = live_far.get(road_class(x), ())
+        blocks = {(int(c.split(':')[0]) // FAR, int(c.split(':')[1]) // FAR) for c in cells}
+        if not any((a + da, b + db) in now for a, b in blocks for da in (-1, 0, 1) for db in (-1, 0, 1)):
+            out.append(x)
+    return out
+
 for t, coords in ways.values():
     rs = refs_of(t)
     cells = cells_of(coords)
@@ -266,7 +290,7 @@ for t, coords in ways.values():
                 add_name(n, x, xc)
         for r in on:
             add_alias(x, r, xc)
-    for u in (t.get('unsigned_ref') or '').split(';') + other_refs(t, tuple(STATE_DOT_REF)):
+    for u in (t.get('unsigned_ref') or '').split(';') + other_refs(t, tuple(STATE_DOT_REF)) + ([] if rs else retired(olds, cells)):
         u = u.strip()
         if re.fullmatch(r'\d+[A-Z]?', u):
             u = f'SR {u}'  # state-maintained numbers kept off the signs (PA quadrant routes, NC secondary roads) print as "SR 1002"
@@ -276,6 +300,35 @@ for t, coords in ways.values():
                     add_name(n, u, cells)
                     if n.strip():
                         unsigned[u].add(n.strip().upper())
+
+# A county's number the map keeps only as another name: Wallahatchie Road, Montgomery County, AL is name_1 "County Road 83" and Old Carter Hill
+# Road "County Road 85" (TIGER's second name), neither with a ref, and ALDOT prints "CO RD 83", "CO RD 85" (app trip 93a7830d). Read as an unsigned
+# number: the street's name carries "CR 83". Only a way with no ref (beside a ref, TIGER's name_1 often names ANOTHER route on the pavement), and
+# not one already named for a county number (the app reads that name itself). build.sh keeps these ways whatever their class.
+COUNTY_NAME = re.compile(r'(?:COUNTY|CO\.?|CNTY) (?:ROAD|RD|HIGHWAY|HWY|ROUTE|RTE) (\d+[A-Z]?)')
+for t, coords in ways.values():
+    nm = (t.get('name') or '').strip().upper()
+    if refs_of(t) or not nm or COUNTY_NAME.fullmatch(nm):
+        continue
+    for k in ('alt_name', 'name_1', 'name_2'):
+        for n in (t.get(k) or '').split(';'):
+            m = COUNTY_NAME.fullmatch(n.strip().upper())
+            if m:
+                add_name(nm, f'CR {m.group(1)}', cells_of(coords))
+                unsigned[f'CR {m.group(1)}'].add(nm)
+
+# A bypass the route itself now runs on: WYDOT prints Douglas's west bypass "WY-59 BY PASS" (app trip d40b2cbf); OSM refs it plain "WY 59" (the
+# road through town is old_ref WY 59) and only TIGER's name remembers it, "State Highway 59 (Bypass)". Such a way is "<its ref> Bypass" too:
+# only the ref whose number TIGER's bypass name carries, and never a ref that is already a bypass, business or other lesser route.
+TIGER_BYPASS = re.compile(r'.*?\b(\d+[A-Z]?) \(Bypass\)', re.I)
+for t, coords in ways.values():
+    tiger = ':'.join(t.get(k) or '' for k in ('tiger:name_base', 'tiger:name_base_1', 'tiger:name_base_2'))
+    if '(bypass)' not in tiger.lower():
+        continue
+    nums = {m.group(1).upper() for m in (TIGER_BYPASS.fullmatch(p.strip()) for p in tiger.split(':')) if m}
+    for r in refs_of(t):
+        if number(r) in nums and rank(r) >= 2:
+            add_alias(f'{canon(r)} Bypass', r, cells_of(coords))
 
 for t, members in relations:
     net = t.get('network') or ''
@@ -313,6 +366,73 @@ for t, members in relations:
         for n in names_of(t, kept=()):
             for _, coords in member_ways:
                 add_name(n, ref, cells_of(coords))
+
+# A numbered street's other name runs as far as the road does. OSM tags "111th Street" as the alt_name of Hassert Boulevard (CH 66, Will County,
+# IL) on the mile east of Book Road only; the permits print "111th St" for all of it to IL-59 (app trip 32591c0f). The ways of one name and one
+# ref that join end to end are one road: a numbered-street name any of them carries in another name tag is carried by all of them. Only a
+# numbered street ("111TH STREET", "WEST 79TH STREET"): a grid street keeps its number for its length, a bridge's memorial name does not.
+NUMBERED_STREET = re.compile(r'\b\d+(?:ST|ND|RD|TH)\b')
+roads_by = defaultdict(list)  # (name, ref) -> way ids
+for wid in way_nodes:
+    t = ways[wid][0]
+    for r in refs_of(t):
+        roads_by[(t['name'].strip().upper(), r)].append(wid)
+for (nm, r), wids in roads_by.items():
+    if len(wids) < 2:
+        continue
+    at = defaultdict(list)
+    for wid in wids:
+        for nd in way_nodes[wid]:
+            at[nd].append(wid)
+    seen = set()
+    for start in wids:
+        if start in seen:
+            continue
+        part, todo = [], [start]
+        seen.add(start)
+        while todo:
+            w = todo.pop()
+            part.append(w)
+            for nd in way_nodes[w]:
+                for o in at[nd]:
+                    if o not in seen:
+                        seen.add(o)
+                        todo.append(o)
+        other = {n.strip().upper() for w in part for k in NAME_KEYS[1:] for n in (ways[w][0].get(k) or '').split(';')}
+        other = {n for n in other if n and n != nm and NUMBERED_STREET.search(n) and not is_designation(n)}
+        if other:
+            cells = set().union(*(cells_of(ways[w][1]) for w in part))
+            for n in other:
+                add_name(n, r, cells)
+
+# Hand-kept ties (names-extra.json): a number a state's permits print that no OSM tag ties to the pavement, each checked against the state
+# DOT's own data and read only inside its box. `on`: ways carrying one of those refs are the printed number too (an alias, and their names
+# carry it); `names`: ways of that name are it (an unsigned number). Written as given: these are not OSM values to be judged by shape.
+# `name` with `on` (and `highway`, the ways' class): a NAME the permits print for those ways (IDOT's "I-80 OVERFLOW LANE" is the US 6 ramp).
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'names-extra.json')) as f:
+    EXTRA = [e for e in json.load(f)['entries'] if e['state'] == STATE]
+for e in EXTRA:
+    s, w, n, ea = e['box']
+    for t, coords in ways.values():
+        inside = [c for c in coords if s <= c[1] <= n and w <= c[0] <= ea]
+        if not inside:
+            continue
+        cells = cells_of(inside)
+        for on in e.get('on', ()):
+            for r in refs_of(t):
+                if norm(r) != norm(on) or t.get('highway') != e.get('highway', t.get('highway')):
+                    continue
+                if 'name' in e:  # a printed NAME for that pavement, not a number
+                    add_name(e['name'], r, cells)
+                    continue
+                aliases[e['ref']][r] |= cells
+                for nm in names_of(t):
+                    add_name(nm, e['ref'], cells)
+        mine = {x.strip().upper() for k in NAME_KEYS for x in (t.get(k) or '').split(';')}
+        for nm in e.get('names', ()):
+            if nm in mine:
+                add_name(nm, e['ref'], cells)
+                unsigned[e['ref']].add(nm)
 
 # Frontage: non-freeway ways beside a ref's main lanes.
 grid = defaultdict(list)  # cell -> [(ref, bearing)]
