@@ -10,6 +10,8 @@
     { "state": "NM", "ref": "NM 9", "names": ["A003 COUNTY ROAD"], "box": [31.78, -107.30, 31.83, -106.68],
       "source": "NMDOT: NM 9 runs on from the Luna county line to NM 136 at Santa Teresa (37 mi); OSM keeps ref NM 9 only west of the line and names the Dona Ana County stretch 'A003 County Road' (the county's own number), no ref" },
     { "state": "IL", "name": "I-80 OVERFLOW LANE", "on": ["US 6"], "highway": "motorway_link", "box": [41.5765, -87.5600, 41.5800, -87.5470],
-      "source": "IDOT permits print 'Turn left on Ramp toward US-6 E / I-80 E / I-94 E, then go on I-80 OVERFLOW LANE' (0.5 mi) between US-6/IL-83 Torrence Ave and I-80 at Lansing: OSM's motorway_link chain there, ref US 6, no name (ways 51805040 to 61431956)" }
+      "source": "IDOT permits print 'Turn left on Ramp toward US-6 E / I-80 E / I-94 E, then go on I-80 OVERFLOW LANE' (0.5 mi) between US-6/IL-83 Torrence Ave and I-80 at Lansing: OSM's motorway_link chain there, ref US 6, no name (ways 51805040 to 61431956)" },
+    { "state": "OK", "ref": "OK 166", "on": ["US Historic 66"], "highway": "tertiary", "box": [36.0124, -96.1010, 36.0182, -96.0986],
+      "source": "ODOT permits print 'OK-66 S 1.3 mi to OK-166; right onto OK-166 north 0.4 mi, then west 0.7 mi to OK-97' (Sapulpa): the north 0.4 mi is Frankoma Road (OSM ref US Historic 66, ways 1051086737 to 99810820) from New Sapulpa Rd up to SH-166's signed 0.69 mi (relation 3504809), which ends at Frankoma" }
   ]
 }
