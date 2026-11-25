@@ -11,15 +11,19 @@ import crypto from 'node:crypto';
 import { MAX_TILE_BYTES, PER_DEGREE } from './query.mjs';
 import { encodeTile3, headLength, blockOf, SCHEMA, TAGS } from '../format/roadTile.mjs';
 
-// Ways Overpass would also return but a truck can never drive. The app's name match would
-// otherwise happily snap a route onto a footpath that shares a street's name.
+// Ways no motor vehicle can drive: footpaths and the like, and roads not built yet (proposed, under construction). Nothing
+// else is dropped (owner, 2026-11-25: the map never drops anything OpenStreetMap has that can be driven; which ways a truck
+// may use is the app's call from the tags kept: highway, service, access, hgv). A pedestrian street or a path that OSM
+// opens to motor vehicles (motor_vehicle / vehicle / motorcar = yes, destination, delivery, permissive, designated) is drivable.
 export const NOT_FOR_VEHICLES = new Set(['footway', 'path', 'cycleway', 'steps', 'pedestrian', 'bridleway', 'corridor',
   'proposed', 'construction', 'platform', 'elevator']);
-// v2 also keeps roads with no name or number in the classes a truck uses, so pickup and delivery legs have real
-// geometry; tracks, driveways and parking aisles stay out (plan 1.1).
-const NOT_FOR_TRUCKS_UNNAMED = new Set(['track', 'bus_guideway', 'raceway', 'escape', 'busway']);
-const UNNAMED_SERVICE_OUT = new Set(['parking_aisle', 'driveway', 'drive-through']);
-export const keepUnnamed = (p) => !NOT_FOR_TRUCKS_UNNAMED.has(p.highway) && !(p.highway === 'service' && UNNAMED_SERVICE_OUT.has(p.service));
+const OPEN = /^(?:yes|destination|delivery|permissive|designated|private|customers|agricultural|forestry)$/;
+export const drivable = (p) => !NOT_FOR_VEHICLES.has(p.highway) || ['motor_vehicle', 'vehicle', 'motorcar'].some((k) => OPEN.test(String(p[k] ?? '')));
+// A guided busway is a track for guided buses only: no other vehicle can drive it. Every other unnamed way is kept in v2
+// (before 2026-11-25 unnamed tracks, escape lanes, busways, raceways, driveways, parking aisles and drive-throughs were
+// dropped while the same classes with a name were kept).
+const NOT_FOR_TRUCKS_UNNAMED = new Set(['bus_guideway']);
+export const keepUnnamed = (p) => !NOT_FOR_TRUCKS_UNNAMED.has(p.highway);
 // v2 is read straight from R2 (no Worker), so its cap is only a sanity bound: dense tiles are never pruned to fit
 // (spec section 4). Boston's is 3.8 MB; New York's will be larger.
 const V2_MAX_TILE_BYTES = 16 * 1024 * 1024;
@@ -29,7 +33,7 @@ const r5 = (x) => Math.round(x * 1e5) / 1e5; // ~1 m, far finer than a route nee
 // One GeoJSON feature from `osmium export` → { v1, v2, keys } (v1 null for an unnamed road), or null to skip it.
 export function toLine(feature) {
   const p = feature.properties ?? {};
-  if (NOT_FOR_VEHICLES.has(p.highway) || feature.geometry?.type !== 'LineString') return null;
+  if (!drivable(p) || feature.geometry?.type !== 'LineString') return null;
   const named = Boolean(p.ref || p.name);
   if (!named && !keepUnnamed(p)) return null;
   const pts = feature.geometry.coordinates.map(([lon, lat]) => [r5(lat), r5(lon)]);

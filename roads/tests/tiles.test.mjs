@@ -63,7 +63,8 @@ test('build lines keep 5 decimals and drop roads a truck cannot use or the app c
   assert.equal(toLine(feature(5, { ref: 'I 95' }, [[-75.1234567, 39.7654321]])).v1, '5\tI 95\t\t39.76543,-75.12346\n');
   assert.equal(toLine({ ...feature(6, { name: 'Main St' }, [[0, 0]]), properties: { '@id': 6, highway: 'footway', name: 'Main St' } }), null);
   assert.equal(toLine(feature(7, {}, [[0, 0]])).v1, null); // no ref, no name: v2 only
-  assert.equal(toLine({ ...feature(9, {}, [[0, 0]]), properties: { '@id': 9, highway: 'service', service: 'driveway' } }), null); // a driveway: neither
+  // A driveway is drivable: kept for v2 (unnamed, so not v1).
+  assert.equal(toLine({ ...feature(9, {}, [[0, 0]]), properties: { '@id': 9, highway: 'service', service: 'driveway' } }).v1, null);
   assert.equal(toLine(feature(8, { name: 'Tab\tName' }, [[0, 0]])).v1, '8\t\tTab Name\t0,0\n');
 });
 
@@ -148,4 +149,17 @@ test('a route crossing a state line is placed on the line, in each direction it 
   // ...and a half too short to leave the line's 30 m margin (18 m here: Kansas City's I-435 eastbound at State Line Road) still has a state.
   const shortB = await wayCrossings(grid, { id: 16, routes: 'US:I|22||forward|', oneway: 'yes', coords: [[-90.0001, 34.4], [-89.9998, 34.4]] });
   assert.deepEqual(table([...shortB.crossings, ...joins([...fwdA.ends, ...shortB.ends])]).map((c) => [c.from, c.to, c.ref]), [['MS', 'AL', '22']]);
+});
+
+// Owner, 2026-11-25: nothing drivable in OSM is dropped. Unnamed tracks, escape lanes, busways, raceways, driveways, parking aisles
+// and drive-throughs were dropped from v2 while the same classes with a name were kept.
+test('every drivable way is kept for v2, named or not; only ways no motor vehicle can drive are dropped', () => {
+  const way = (id, props) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: [[0, 0], [0.001, 0]] }, properties: { '@id': id, ...props } });
+  for (const [id, props] of [[1, { highway: 'track' }], [2, { highway: 'escape' }], [3, { highway: 'busway' }], [4, { highway: 'raceway' }],
+    [5, { highway: 'service', service: 'parking_aisle' }], [6, { highway: 'service', service: 'drive-through' }], [7, { highway: 'service', service: 'driveway' }],
+    [8, { highway: 'pedestrian', motor_vehicle: 'delivery' }], [9, { highway: 'path', motor_vehicle: 'yes' }], [10, { highway: 'unclassified' }]])
+    assert.ok(toLine(way(id, props))?.v2, `${JSON.stringify(props)} kept`);
+  for (const [id, props] of [[11, { highway: 'footway' }], [12, { highway: 'pedestrian' }], [13, { highway: 'construction' }], [14, { highway: 'bus_guideway' }],
+    [15, { highway: 'cycleway', motor_vehicle: 'no' }]])
+    assert.equal(toLine(way(id, props)), null, `${JSON.stringify(props)} dropped`);
 });

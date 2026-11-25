@@ -18,7 +18,7 @@ rm -rf "$WORK/routed.jsonl" "$WORK/raw" "$WORK/raw2" "$WORK/tiles" "$WORK/tiles2
 mkdir -p "$WORK/pbf"
 # The tags the app reads plus v2's raw evidence (format/roadTile.mjs TAGS). area_tags=false keeps closed ways
 # (roundabouts) as lines.
-echo '{"attributes":{"id":true},"linear_tags":true,"area_tags":false,"include_tags":["highway","ref","name","oneway","junction","service","layer","bridge","tunnel","access","hgv","maxheight","maxwidth","maxweight","old_ref"]}' > "$WORK/export.json"
+echo '{"attributes":{"id":true},"linear_tags":true,"area_tags":false,"include_tags":["highway","ref","name","oneway","junction","service","layer","bridge","tunnel","access","hgv","maxheight","maxwidth","maxweight","old_ref","motor_vehicle","vehicle","motorcar"]}' > "$WORK/export.json"
 echo '{"attributes":{"id":true},"linear_tags":true,"area_tags":false,"include_tags":["highway","ref","destination","destination:lanes","destination:street","exit_to"]}' > "$WORK/signs.json"
 # Traffic signals (signals.mjs): the node, its id and what kind of signal it is.
 echo '{"attributes":{"id":true},"linear_tags":false,"area_tags":false,"include_tags":["highway","traffic_signals"]}' > "$WORK/signal-tags.json"
