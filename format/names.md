@@ -43,6 +43,11 @@ file whose size or SHA-256 differs from the pointer.
   bypass); `names` are streets with no ref that are the number (`unsigned`).
   An entry with `name` instead of `ref` gives the `on` ways of its `highway` class a NAME the permits print (IDOT's "I-80 OVERFLOW LANE"
   is the unnamed US 6 ramp chain from Torrence Avenue to I-80 at Lansing): `names[NAME][map ref]`.
+- Hand-kept tags by way id (`roads/ways-extra.json`): a name or number a state DOT's open data gives an OSM way that carries none, for
+  pavement no tie above can reach because the way has no name (NC's SR-1544 "N Halifax Rd" at I-95 exit 145 is unnamed trunk in OSM).
+  Applied by both the road tiles (tile.mjs) and this index (names.py), only where the way has the entry's `when` tags, lacks every key
+  it sets and lies wholly inside the entry's `box`: never over OSM's own value, a no-op once OSM has it, and dropped if a merge stretches
+  the id onto other pavement.
 - `aliases[printed ref][map ref]`: squares where pavement the map refs as `map ref` is also `printed ref`, so a permit that prints
   one is read on pavement labelled the other. Sources: a way's or route relation's `old_ref` / `fut_ref` / `official_ref` /
   `unsigned_ref` against its `ref` (NC's Clayton Bypass: `"US 70": { "I 42": … }`; I-69 at Cleveland, TX: `"I 69": { "US 59": … }`),

@@ -142,6 +142,19 @@ def road_class(r):
     p = 'I' if p in ('I', 'IH') else p if p in ('US', 'FM', 'RM', 'PR') else 'CR' if p in ('CR', 'CO', 'CH', 'CTH', 'CNTY', 'CSAH') else 'S'
     return f'{p}{n}{w or ""}'
 ways = {}          # id -> (tags, coords)
+# Hand-kept tags on OSM way ids from a state DOT's open data (ways-extra.json, as tile.mjs reads it): applied only where the way has `when`'s
+# tags, lacks every key the entry sets (never over OSM's own value) and lies wholly inside the entry's box [south, west, north, east], so
+# an id a mapper's merge stretches onto other pavement keeps OSM's tags.
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ways-extra.json')) as f:
+    WAY_EXTRA = {int(i): e for e in json.load(f)['entries'] for i in e['ways']}
+def with_way_extras(oid, t, coords):
+    e = WAY_EXTRA.get(oid)
+    if not e or any(t.get(k) != v for k, v in e.get('when', {}).items()) or any(t.get(k) for k in e['set']):
+        return t
+    s, w, n, ea = e['box']
+    if not coords or any(not (s <= y <= n and w <= x <= ea) for x, y in coords):
+        return t
+    return {**t, **e['set']}
 way_nodes = {}     # id -> node ids, for named ways with a ref (numbered-street names, below)
 relations = []     # (tags, member way ids)
 for line in sys.stdin:
@@ -157,6 +170,7 @@ for line in sys.stdin:
             m = re.search(r'x(-?[\d.]+)y(-?[\d.]+)', nd)
             if m:
                 coords.append((float(m.group(1)), float(m.group(2))))
+        t = with_way_extras(oid, t, coords)
         ways[oid] = (t, coords)
         if t.get('name') and t.get('ref'):
             way_nodes[oid] = [nd.split('x')[0] for nd in (fields.get('N') or '').split(',') if nd]
@@ -431,7 +445,8 @@ for e in EXTRA:
         mine = {x.strip().upper() for k in NAME_KEYS for x in (t.get(k) or '').split(';')}
         for nm in e.get('names', ()):
             if nm in mine:
-                add_name(nm, e['ref'], cells)
+                # As given, even a name shaped like a number ("OLD 119" is PennDOT's SR 3093), which add_name leaves out.
+                names[nm][e['ref']] |= cells
                 unsigned[e['ref']].add(nm)
 
 # Frontage: non-freeway ways beside a ref's main lanes.
