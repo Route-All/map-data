@@ -36,6 +36,10 @@ const EXTRA_WZDX = [
   { feedname: 'az511', issuingorganization: 'Arizona DOT', url: 'https://az511.com/api/wzdx', active: 'true', needapikey: 'false' },
   { feedname: 'nvroads', issuingorganization: 'Nevada DOT', url: 'https://www.nvroads.com/api/wzdx', active: 'true', needapikey: 'false' },
 ];
+// RouteAll is US-only (owner, 2026-11-26): registry feeds outside the US are never fetched, published
+// or freshness-checked. Quebec City is the registry's only non-US feed (checked 2026-11-26); its
+// server stopped answering within the 25 s timeout on 2026-11-24, which is what made Freshness fail.
+const NON_US_FEEDS = new Set(['quebec']);
 export const PER_DEGREE = 2;
 const HOUR = 3_600_000;
 // Planned work that has not started yet is shown this far ahead, so a driver planning tonight's
@@ -172,11 +176,11 @@ const KEY_HEADER = {
 const KEY_PLACEHOLDER = /INSERT[-_]API[-_]KEY(?:[-_]HERE)?|\[[^\]]*key[^\]]*\]|YOUR-[A-Z-]*API-KEY|%3ckey%3e|<key>/i;
 
 /**
- * The registry's active WZDx feeds: every keyless one, plus each keyed one whose key is in `keys`
+ * The registry's active US WZDx feeds: every keyless one, plus each keyed one whose key is in `keys`
  * (the WZDX_KEYS secret, feed name → key), with the key put where that feed expects it.
  */
 export function wzdxSources(registry, keys = {}) {
-  return registry.filter((r) => String(r.active) === 'true').flatMap((r) => {
+  return registry.filter((r) => String(r.active) === 'true' && !NON_US_FEEDS.has(r.feedname)).flatMap((r) => {
     let url = r.url?.url ?? r.url;
     if (typeof url !== 'string' || !/^https:\/\//.test(url)) return [];
     if (String(r.needapikey) !== 'true') return [{ id: r.feedname, name: r.issuingorganization, url }];
