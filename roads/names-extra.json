@@ -12,6 +12,12 @@
     { "state": "IL", "name": "I-80 OVERFLOW LANE", "on": ["US 6"], "highway": "motorway_link", "box": [41.5765, -87.5600, 41.5800, -87.5470],
       "source": "IDOT permits print 'Turn left on Ramp toward US-6 E / I-80 E / I-94 E, then go on I-80 OVERFLOW LANE' (0.5 mi) between US-6/IL-83 Torrence Ave and I-80 at Lansing: OSM's motorway_link chain there, ref US 6, no name (ways 51805040 to 61431956)" },
     { "state": "OK", "ref": "OK 166", "on": ["US Historic 66"], "highway": "tertiary", "box": [36.0124, -96.1010, 36.0182, -96.0986],
-      "source": "ODOT permits print 'OK-66 S 1.3 mi to OK-166; right onto OK-166 north 0.4 mi, then west 0.7 mi to OK-97' (Sapulpa): the north 0.4 mi is Frankoma Road (OSM ref US Historic 66, ways 1051086737 to 99810820) from New Sapulpa Rd up to SH-166's signed 0.69 mi (relation 3504809), which ends at Frankoma" }
+      "source": "ODOT permits print 'OK-66 S 1.3 mi to OK-166; right onto OK-166 north 0.4 mi, then west 0.7 mi to OK-97' (Sapulpa): the north 0.4 mi is Frankoma Road (OSM ref US Historic 66, ways 1051086737 to 99810820) from New Sapulpa Rd up to SH-166's signed 0.69 mi (relation 3504809), which ends at Frankoma" },
+    { "state": "PA", "ref": "SR 3093", "names": ["OLD 119", "STATE ROUTE 3093"], "box": [40.152, -79.612, 40.225, -79.553],
+      "source": "PennDOT RMS (opendata roadwaysegments, Westmoreland 64): SR 3093 segs 0010-0130 are Old 119 SH / Old Stanton Rd / Center Av, Scottdale to Mt Pleasant Twp; OSM names them 'Old 119' and 'State Route 3093' (ways 90113501, 643222620, 12078487...), every such way in the box within 15 m of the PennDOT line; no ref:penndot. Printed 'SR-3093 S 0.57 to TECHNOLOGY DR (SR3095)' (app trip 41f03819)" },
+    { "state": "PA", "ref": "SR 3095", "names": ["TECHNOLOGY DRIVE"], "box": [40.188, -79.584, 40.202, -79.577],
+      "source": "PennDOT RMS: SR 3095 segs 0010-0021 are Technology Dr from SR 3093 (Old 119) to the US 119 ramps (SR 8005), Westmoreland Technology Park; OSM 'Technology Drive' ways 70843053, 70843346, 643222623, within 3 m of the PennDOT line, no ref:penndot (app trip 41f03819)" },
+    { "state": "TX", "ref": "US 59", "names": ["NORTH TEMPLE DRIVE"], "box": [31.196, -94.782, 31.2065, -94.774],
+      "source": "TxDOT Roadways: North Temple Drive at Diboll is BU0059H, where FM 2497 begins (31.20414,-94.77662); TxDOT's permits still print it US0059 ('US0059, 0.3mi S of US0059 & FM 2497', app trip 3f0684fe). Only the 0.6 mi beside the FM 2497 junction, off the US 59 Diboll Relief Route; OSM ways 1432687523-1432687529 carry no ref" }
   ]
 }

@@ -343,3 +343,29 @@ test('names: a county number kept as another name, a bypass only TIGER remembers
   ]);
   assert.deepEqual(il.names['I-80 OVERFLOW LANE'], { 'US 6': '4157,-8756 1' });
 });
+
+test('names: hand-kept DOT numbers on named streets with no ref, only in their box (map-gaps-1127)', () => {
+  const run = (state, opl) => { const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
+    execFileSync('python3', [path.join(DIR, 'names.py'), state, path.join(work, 'names')], { input: opl.join('\n') + '\n' });
+    return JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'names', fs.readdirSync(path.join(work, 'names'))[0])))); };
+  // PA trip 41f03819: PennDOT's SR 3093 is OSM's "Old 119" and SR 3095 "Technology Drive" near Scottdale; an "Old 119" elsewhere is not.
+  const pa = run('pennsylvania', [
+    way(1, { highway: 'secondary', name: 'Old 119' }, line(-79.5818, -79.5677, 40.1830)),
+    way(2, { highway: 'secondary', name: 'Technology Drive' }, line(-79.5818, -79.5790, 40.1950)),
+    way(3, { highway: 'secondary', name: 'Old 119' }, line(-79.70, -79.65, 40.40)),
+    way(4, { highway: 'secondary', name: 'Technology Drive' }, line(-79.95, -79.90, 40.45)),
+  ]);
+  assert.deepEqual(pa.unsigned['SR 3093'], ['OLD 119']);
+  assert.deepEqual(pa.unsigned['SR 3095'], ['TECHNOLOGY DRIVE']);
+  assert.ok(decode(pa.names['OLD 119']['SR 3093']).includes('4018:-7957'));
+  assert.ok(!decode(pa.names['OLD 119']['SR 3093']).some((c) => c.startsWith('4040:')));
+  assert.ok(!decode(pa.names['TECHNOLOGY DRIVE']['SR 3095']).some((c) => c.startsWith('4045:')));
+  // TX trip 3f0684fe: TxDOT prints US0059 for North Temple Drive (BU 59-H) at FM 2497, Diboll; only that 0.6 mi, never the rest of Temple Drive.
+  const tx = run('texas', [
+    way(1, { highway: 'primary', name: 'North Temple Drive' }, line(-94.7787, -94.7768, 31.2010)),
+    way(2, { highway: 'primary', name: 'North Temple Drive' }, line(-94.7820, -94.7810, 31.1870)),
+  ]);
+  assert.deepEqual(tx.unsigned['US 59'], ['NORTH TEMPLE DRIVE']);
+  assert.ok(decode(tx.names['NORTH TEMPLE DRIVE']['US 59']).includes('3120:-9478'));
+  assert.ok(!decode(tx.names['NORTH TEMPLE DRIVE']['US 59']).some((c) => c.startsWith('3118:')));
+});

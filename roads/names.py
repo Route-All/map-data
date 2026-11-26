@@ -431,7 +431,8 @@ for e in EXTRA:
         mine = {x.strip().upper() for k in NAME_KEYS for x in (t.get(k) or '').split(';')}
         for nm in e.get('names', ()):
             if nm in mine:
-                add_name(nm, e['ref'], cells)
+                # As given, even a name shaped like a number ("OLD 119" is PennDOT's SR 3093), which add_name leaves out.
+                names[nm][e['ref']] |= cells
                 unsigned[e['ref']].add(nm)
 
 # Frontage: non-freeway ways beside a ref's main lanes.
