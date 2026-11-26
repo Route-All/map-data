@@ -5,6 +5,8 @@
 // - the events manifest was built over 3 h ago (the hourly publisher has stopped);
 // - a road-work feed's last successful check (lastValidatedAt) is over 24 h old, or it never had one;
 // - a feed's snapshot row count fell more than 50% from the previous manifest (from 20 rows up);
+// - a feed is skipped for any reason but "outside the US", or was in the previous manifest and is now in
+//   neither `feeds` nor `skipped` (a US feed lost by the US-only rule, events.mjs usOnly);
 // - the road build is 35 days old, or fuel prices are over 15 days old.
 // Reads only public files, so it needs no credentials.
 import fs from 'node:fs';
@@ -41,6 +43,13 @@ await check('events', async () => {
     else if (age(f.lastValidatedAt) > 24) alerts.push(`events/${id}: last checked ${age(f.lastValidatedAt).toFixed(1)} h ago (${f.error ?? f.status})`);
     const before = previous?.feeds?.[id]?.total;
     if (before >= 20 && (f.total ?? 0) < before / 2) alerts.push(`events/${id}: ${f.total ?? 0} rows, down from ${before}`);
+  }
+  // A feed may leave `feeds` only as a non-US skip (events.mjs usOnly); anything else is a US feed lost.
+  for (const [id, s] of Object.entries(manifest.skipped ?? {}).sort()) {
+    if (s.reason !== 'outside the US') alerts.push(`events/${id}: skipped (${s.reason})`);
+  }
+  for (const id of Object.keys(previous?.feeds ?? {}).sort()) {
+    if (!manifest.feeds[id] && !manifest.skipped?.[id]) alerts.push(`events/${id}: in the previous manifest, now neither fetched nor skipped`);
   }
 });
 await check('roads', async () => {

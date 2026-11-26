@@ -18,7 +18,7 @@ const SHOWER_TRUCK_BRANDS = /\bkwik (trip|star)\b/i;
 // Signed for cars only: never a truck stop, whatever else the tags say.
 const CARS_ONLY = /\bbuc-?ee'?s\b/i;
 // Geofabrik extract name → USPS code, stored on each place so the app can find its region's fuel price.
-const STATE_CODES = {
+export const STATE_CODES = {
   alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR', california: 'CA', colorado: 'CO', connecticut: 'CT',
   delaware: 'DE', 'district-of-columbia': 'DC', florida: 'FL', georgia: 'GA', hawaii: 'HI', idaho: 'ID', illinois: 'IL',
   indiana: 'IN', iowa: 'IA', kansas: 'KS', kentucky: 'KY', louisiana: 'LA', maine: 'ME', maryland: 'MD',

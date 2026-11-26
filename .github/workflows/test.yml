@@ -1,0 +1,41 @@
+# Unit tests on every pull request (roads/ and format/, Node's own test runner). No secrets, no publishing.
+
+name: Test
+
+on:
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: test-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash --noprofile --norc -euo pipefail {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Install
+        run: (cd roads && npm ci --omit=dev) && (cd format && npm ci --omit=dev)
+
+      - name: Test roads
+        working-directory: roads
+        run: npm test
+
+      - name: Test format
+        working-directory: format
+        run: npm test
