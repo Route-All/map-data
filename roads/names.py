@@ -142,6 +142,15 @@ def road_class(r):
     p = 'I' if p in ('I', 'IH') else p if p in ('US', 'FM', 'RM', 'PR') else 'CR' if p in ('CR', 'CO', 'CH', 'CTH', 'CNTY', 'CSAH') else 'S'
     return f'{p}{n}{w or ""}'
 ways = {}          # id -> (tags, coords)
+# Hand-kept tags on OSM way ids from a state DOT's open data (ways-extra.json, as tile.mjs reads it): applied only where the way has `when`'s
+# tags and lacks every key the entry sets, never over OSM's own value.
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ways-extra.json')) as f:
+    WAY_EXTRA = {int(i): e for e in json.load(f)['entries'] for i in e['ways']}
+def with_way_extras(oid, t):
+    e = WAY_EXTRA.get(oid)
+    if not e or any(t.get(k) != v for k, v in e.get('when', {}).items()) or any(t.get(k) for k in e['set']):
+        return t
+    return {**t, **e['set']}
 way_nodes = {}     # id -> node ids, for named ways with a ref (numbered-street names, below)
 relations = []     # (tags, member way ids)
 for line in sys.stdin:
@@ -157,6 +166,7 @@ for line in sys.stdin:
             m = re.search(r'x(-?[\d.]+)y(-?[\d.]+)', nd)
             if m:
                 coords.append((float(m.group(1)), float(m.group(2))))
+        t = with_way_extras(oid, t)
         ways[oid] = (t, coords)
         if t.get('name') and t.get('ref'):
             way_nodes[oid] = [nd.split('x')[0] for nd in (fields.get('N') or '').split(',') if nd]

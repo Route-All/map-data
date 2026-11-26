@@ -10,6 +10,7 @@ import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { MAX_TILE_BYTES, PER_DEGREE } from './query.mjs';
 import { encodeTile3, headLength, blockOf, SCHEMA, TAGS } from '../format/roadTile.mjs';
+import { withWayExtras } from './waysExtra.mjs';
 
 // Ways Overpass would also return but a truck can never drive. The app's name match would
 // otherwise happily snap a route onto a footpath that shares a street's name.
@@ -28,7 +29,8 @@ const r5 = (x) => Math.round(x * 1e5) / 1e5; // ~1 m, far finer than a route nee
 
 // One GeoJSON feature from `osmium export` → { v1, v2, keys } (v1 null for an unnamed road), or null to skip it.
 export function toLine(feature) {
-  const p = feature.properties ?? {};
+  // A DOT's name or number for a way OSM leaves without one (ways-extra.json, NC's SR-1544 at I-95 exit 145).
+  const p = withWayExtras(feature.properties?.['@id'] ?? '', feature.properties ?? {});
   if (NOT_FOR_VEHICLES.has(p.highway) || feature.geometry?.type !== 'LineString') return null;
   const named = Boolean(p.ref || p.name);
   if (!named && !keepUnnamed(p)) return null;

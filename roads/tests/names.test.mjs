@@ -369,3 +369,16 @@ test('names: hand-kept DOT numbers on named streets with no ref, only in their b
   assert.ok(decode(tx.names['NORTH TEMPLE DRIVE']['US 59']).includes('3120:-9478'));
   assert.ok(!decode(tx.names['NORTH TEMPLE DRIVE']['US 59']).some((c) => c.startsWith('3118:')));
 });
+
+test('names: a DOT name kept by way id (ways-extra) names an unsigned number on an unnamed way (NC SR-1544, map-gaps-1127)', () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
+  execFileSync('python3', [path.join(DIR, 'names.py'), 'north-carolina', path.join(work, 'names')], { input: [
+    way(1314788859, { highway: 'trunk', unsigned_ref: 'SR 1544' }, [[-77.82219, 36.06367], [-77.82292, 36.06395]]),
+    way(1314788860, { highway: 'trunk', unsigned_ref: 'SR 1544' }, [[-77.82292, 36.06395], [-77.82301, 36.06398]]),
+    way(99, { highway: 'trunk', unsigned_ref: 'SR 1544' }, [[-78.50, 35.50], [-78.49, 35.50]]),
+  ].join('\n') + '\n' });
+  const nc = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'names', 'NC.json.gz'))));
+  assert.deepEqual(nc.unsigned['SR 1544'], ['NORTH HALIFAX ROAD']);
+  const cells = decode(nc.names['NORTH HALIFAX ROAD']['SR 1544']);
+  assert.ok(cells.includes('3606:-7783') && !cells.some((c) => c.startsWith('3550:')));
+});
