@@ -130,6 +130,54 @@ test('with the state lines unreadable, a changed "n/a" feed keeps its last check
   assert.deepEqual((await store.getJson(m.feeds.mixfeed.normalizedObjectKey)).map((r) => [r.lon, r.lat]), [[-96, 41]]);
 });
 
+// A manifest from before the US filter (#40): mixfeed's snapshot holds a Canadian event and has no `usChecked`.
+async function legacyStore(files) {
+  files.set(REGISTRY_URL, JSON.stringify([reg('mixfeed', 'n/a')]));
+  files.set('https://mixfeed.example/wzdx', feed([-96, 41], [-76, 51]));
+  const store = memoryStore();
+  await run(store, files, NOW);
+  const pointer = await store.getJson('events/v2/current.json'), m = await store.getJson(pointer.manifest);
+  const [us] = await store.getJson(m.feeds.mixfeed.normalizedObjectKey);
+  store.objects.set('events/v2/objects/legacy.json', Buffer.from(JSON.stringify([us, { ...us, id: 'ca', lon: -76, lat: 51 }])));
+  const { usChecked, ...old } = m.feeds.mixfeed;
+  assert.equal(usChecked, true);
+  m.feeds.mixfeed = { ...old, normalizedObjectKey: 'events/v2/objects/legacy.json', total: 2 };
+  store.objects.set(pointer.manifest, Buffer.from(JSON.stringify(m)));
+  return store;
+}
+
+test('a snapshot stored before the US filter is filtered when reloaded: unchanged, retained, or Unavailable with the lines unreadable', async () => {
+  // The same bytes again (unchanged): reloaded, filtered, stored again with its total and bbox.
+  let files = boundaryFiles(), store = await legacyStore(files);
+  const m1 = await run(store, files, NOW + HOUR);
+  assert.equal(m1.feeds.mixfeed.status, 'fresh');
+  assert.deepEqual((await store.getJson(m1.feeds.mixfeed.normalizedObjectKey)).map((r) => [r.lon, r.lat]), [[-96, 41]]);
+  assert.deepEqual([m1.feeds.mixfeed.total, m1.feeds.mixfeed.bbox, m1.feeds.mixfeed.usChecked, m1.count], [1, [-96, 41, -96, 41], true, 1]);
+  // The feed down (retained): last run's snapshot, filtered.
+  files = boundaryFiles(); store = await legacyStore(files);
+  files.delete('https://mixfeed.example/wzdx');
+  const m2 = await run(store, files, NOW + HOUR);
+  assert.equal(m2.feeds.mixfeed.status, 'retained');
+  assert.deepEqual((await store.getJson(m2.feeds.mixfeed.normalizedObjectKey)).map((r) => [r.lon, r.lat]), [[-96, 41]]);
+  assert.equal(m2.count, 1);
+  // The state lines unreadable: never checked, so not served.
+  files = boundaryFiles(); store = await legacyStore(files);
+  for (const k of [...files.keys()]) if (k.startsWith('boundaries/')) files.delete(k);
+  const m3 = await run(store, files, NOW + HOUR);
+  assert.equal(m3.feeds.mixfeed.status, 'unavailable');
+  assert.equal(m3.count, 0);
+});
+
+test('freshness warns when the manifest has no registry copy, rather than checking nothing in silence', () => {
+  const at = new Date().toISOString();
+  const out = freshness({
+    'events/v2/manifests/b.json': { builtAt: at, registry: { status: 'unavailable', error: 'HTTP 503' }, feeds: { kept: { lastValidatedAt: at, total: 1 } }, skipped: {} },
+    'events/v2/current.json': { manifest: 'events/v2/manifests/b.json' },
+  });
+  assert.match(out, /WARN events: the manifest has no registry copy \(HTTP 503\); lost feeds not checked/);
+  assert.doesNotMatch(out, /ALERT events/); // a warning, not an alert
+});
+
 function freshness(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'freshness-'));
   for (const [k, v] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(dir, k)), { recursive: true }); fs.writeFileSync(path.join(dir, k), JSON.stringify(v)); }

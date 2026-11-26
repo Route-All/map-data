@@ -301,19 +301,24 @@ async function putObject(store, text, known) {
  */
 async function refreshFeed(source, prev, { store, known, now, fetchImpl }) {
   const attempt = { name: source.name, lastAttemptAt: iso(now) };
+  // Last run's snapshot → { rows, fix } (`fix`: state fields to replace). A feed the US filter applies to whose snapshot
+  // was stored before it ran (no `usChecked`) is filtered now and stored again; with the state lines unreadable that
+  // throws, and the feed is Unavailable rather than serving events never checked.
   const snapshot = async (key) => {
     const rows = key && (await store.getJson(key));
     if (!Array.isArray(rows)) throw new Error(`snapshot ${key ?? '(none)'} is missing`);
-    return rows;
+    if (!source.usFilter || prev.usChecked) return { rows, fix: {} };
+    const us = await source.usFilter(rows);
+    return { rows: us, fix: { usChecked: true, total: us.length, bbox: bboxOf(us), normalizedObjectKey: await putObject(store, JSON.stringify(us), known) } };
   };
   try {
     const seen = prev?.normalizedObjectKey ? { ...prev.validators, hash: prev.sourceBodyHash } : null;
     const body = await getBody(source.url, fetchImpl, seen, source.headers);
     if (body.unchanged) {
       // A 304 or the same bytes: confirmed again (lastValidatedAt moves), published time does not.
-      const rows = await snapshot(prev.normalizedObjectKey);
+      const { rows, fix } = await snapshot(prev.normalizedObjectKey);
       const { error, ...kept } = prev;
-      return { rows, state: { ...kept, ...attempt, status: 'fresh', coverage: 'complete', lastValidatedAt: iso(now),
+      return { rows, state: { ...kept, ...fix, ...attempt, status: 'fresh', coverage: 'complete', lastValidatedAt: iso(now),
         validators: { etag: body.stamp?.etag ?? prev.validators?.etag ?? null, modified: body.stamp?.modified ?? prev.validators?.modified ?? null } } };
     }
     const parsed = source.parse(body.json).filter(Boolean).map((r) => ({ ...r, feed: source.id })).sort(byId);
@@ -324,12 +329,13 @@ async function refreshFeed(source, prev, { store, known, now, fetchImpl }) {
     const published = time(info?.update_date) ?? time(body.stamp.modified);
     return { rows, state: { ...attempt, status: 'fresh', coverage: 'complete', lastValidatedAt: iso(now),
       sourcePublishedAt: published === null ? null : iso(published), sourceBodyHash: body.stamp.hash,
-      normalizedObjectKey: await putObject(store, JSON.stringify(rows), known),
+      normalizedObjectKey: await putObject(store, JSON.stringify(rows), known), ...(source.usFilter && { usChecked: true }),
       validators: { etag: body.stamp.etag, modified: body.stamp.modified }, total: rows.length, bbox: bboxOf(rows) } };
   } catch (e) {
     const error = String(e.message ?? e).slice(0, 120);
     try {
-      return { rows: await snapshot(prev?.normalizedObjectKey), state: { ...prev, ...attempt, status: 'retained', coverage: 'partial', error } };
+      const { rows, fix } = await snapshot(prev?.normalizedObjectKey);
+      return { rows, state: { ...prev, ...fix, ...attempt, status: 'retained', coverage: 'partial', error } };
     } catch {
       // The area it last reported in is kept, so its tiles still read as unchecked, not empty.
       return { rows: [], state: { ...attempt, status: 'unavailable', coverage: 'unavailable', error,
