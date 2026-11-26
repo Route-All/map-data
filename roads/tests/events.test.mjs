@@ -175,6 +175,7 @@ test('freshness warns when the manifest has no registry copy, rather than checki
     'events/v2/current.json': { manifest: 'events/v2/manifests/b.json' },
   });
   assert.match(out, /WARN events: the manifest has no registry copy \(HTTP 503\); lost feeds not checked/);
+  assert.doesNotMatch(out, /ALERT events/); // a warning, not an alert
 });
 
 function freshness(files) {
