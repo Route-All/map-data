@@ -5,8 +5,8 @@
 // - the events manifest was built over 3 h ago (the hourly publisher has stopped);
 // - a road-work feed's last successful check (lastValidatedAt) is over 24 h old, or it never had one;
 // - a feed's snapshot row count fell more than 50% from the previous manifest (from 20 rows up);
-// - a feed is skipped for any reason but "outside the US", or was in the previous manifest and is now in
-//   neither `feeds` nor `skipped` (a US feed lost by the US-only rule, events.mjs usOnly);
+// - a feed is skipped for any reason but "outside the US", or an active keyless feed in the manifest's registry
+//   copy is in neither `feeds` nor `skipped` (a US feed lost, events.mjs usOnly);
 // - the road build is 35 days old, or fuel prices are over 15 days old.
 // Reads only public files, so it needs no credentials.
 import fs from 'node:fs';
@@ -44,12 +44,18 @@ await check('events', async () => {
     const before = previous?.feeds?.[id]?.total;
     if (before >= 20 && (f.total ?? 0) < before / 2) alerts.push(`events/${id}: ${f.total ?? 0} rows, down from ${before}`);
   }
-  // A feed may leave `feeds` only as a non-US skip (events.mjs usOnly); anything else is a US feed lost.
+  // A feed may stay out of `feeds` only as a non-US skip (events.mjs usOnly). Checked against the registry copy this
+  // manifest was built from, not the previous manifest (that moves hourly, this check runs every 3 h): every active
+  // keyless feed in it must be fetched or skipped. A deactivated feed is not expected; a keyed one is fetched only
+  // when its key is set, which public files do not show.
   for (const [id, s] of Object.entries(manifest.skipped ?? {}).sort()) {
     if (s.reason !== 'outside the US') alerts.push(`events/${id}: skipped (${s.reason})`);
   }
-  for (const id of Object.keys(previous?.feeds ?? {}).sort()) {
-    if (!manifest.feeds[id] && !manifest.skipped?.[id]) alerts.push(`events/${id}: in the previous manifest, now neither fetched nor skipped`);
+  const registry = manifest.registry?.objectKey ? await get(manifest.registry.objectKey) : [];
+  for (const r of registry) {
+    const url = r.url?.url ?? r.url;
+    if (String(r.active) !== 'true' || String(r.needapikey) === 'true' || !/^https:\/\//.test(url ?? '')) continue;
+    if (!manifest.feeds[r.feedname] && !manifest.skipped?.[r.feedname]) alerts.push(`events/${r.feedname}: active in the registry, neither fetched nor skipped`);
   }
 });
 await check('roads', async () => {

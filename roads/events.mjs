@@ -40,17 +40,19 @@ const EXTRA_WZDX = [
 ];
 // RouteAll is US-only (owner, 2026-11-26): nothing outside the US is published. The registry's `state`
 // field names a feed's jurisdiction ("texas", "New Hampshire, Vermont, Maine"). A feed it does not place
-// ("n/a", "nps") is checked event by event against the Census state lines this repo publishes: events
-// proven outside the US are dropped, and a feed ALL of whose events are outside is skipped (`skipped` in
-// the manifest) and not fetched again. One that cannot be placed (no events, lines unreadable) is kept
-// and warned about. Quebec City ("n/a") was the first: its server stopped answering on 2026-11-24.
+// ("n/a", "nps") is checked event by event against the Census state lines this repo publishes, before
+// its snapshot is stored: events proven outside the US are dropped (and warned about), the feed itself
+// stays and is fetched again next hour, so one bad reading never loses a US feed. Only KNOWN_OUTSIDE
+// feeds are skipped without a fetch (`skipped` in the manifest). Quebec City ("n/a") was the first:
+// its server stopped answering on 2026-11-24 and Freshness failed on it.
 const US_NAMES = new Set([...Object.keys(STATE_CODES), 'puerto-rico', 'guam', 'us-virgin-islands', 'american-samoa', 'northern-mariana-islands']);
 const TILES = 'https://tiles.routeall.app';
 export const OUTSIDE_US = 'outside the US';
 // Quebec City as last seen (2026-11-24, before #39 stopped fetching it), so a run with no record of it skips it too.
 const KNOWN_OUTSIDE = { quebec: { name: 'Quebec City', state: 'n/a', bbox: [-71.43886, 46.74985, -71.16176, 46.91896], reason: OUTSIDE_US } };
 // The Census grid holds the 50 states and DC only (boundaries.mjs). ponytail: territories as boxes
-// (PR, USVI, Guam, CNMI, American Samoa), [west, south, east, north]; no foreign land lies inside them.
+// (PR, USVI, Guam, CNMI, American Samoa), [west, south, east, north]. The USVI box also takes in the
+// British Virgin Islands (Tortola), which errs toward keeping; the others hold no foreign land.
 const TERRITORIES = [[-67.95, 17.88, -65.22, 18.53], [-65.09, 17.67, -64.56, 18.42], [144.61, 13.23, 144.96, 13.66],
   [144.88, 14.1, 146.08, 20.56], [-171.1, -14.6, -168.1, -11.0]];
 export const PER_DEGREE = 2;
@@ -239,33 +241,28 @@ export async function usLocator(fetchImpl = fetch, origin = TILES) {
       return at.kind === 'unavailable' ? null : at.kind !== 'outside_us';
     };
   } catch (e) {
-    console.log(`::warning::US state lines unreadable (${String(e.message ?? e).slice(0, 120)}); only feeds skipped last run are skipped`);
+    console.log(`::warning::US state lines unreadable (${String(e.message ?? e).slice(0, 120)}); feeds the registry does not place keep their last checked events`);
     return null;
   }
 }
 
 /**
- * Splits sources into those to fetch (`kept`) and those skipped as outside the US (`skipped`, id → { name, state,
- * bbox, reason }), which are not fetched: a feed the registry's `state` does not place and that the last manifest
- * (`seen.skipped`, else KNOWN_OUTSIDE) found entirely outside the US.
+ * Splits sources into those to fetch (`kept`) and the KNOWN_OUTSIDE ones (`skipped`, id → { name, state, bbox,
+ * reason }), which are never fetched. Every other feed is fetched; its events are checked by usRows.
  */
-export function usOnly(sources, seen = {}) {
+export function usOnly(sources) {
   const kept = [], skipped = {};
   for (const s of sources) {
-    const before = !usStateField(s.state) && (seen.skipped?.[s.id] ?? KNOWN_OUTSIDE[s.id]);
-    if (before) skipped[s.id] = before; else kept.push(s);
+    if (!usStateField(s.state) && KNOWN_OUTSIDE[s.id]) skipped[s.id] = KNOWN_OUTSIDE[s.id]; else kept.push(s);
   }
   return { kept, skipped };
 }
 
-/**
- * A feed's rows without those proven outside the US (`locate` false); a row it cannot place stays. `outside` is true
- * when the feed had rows and every one was outside, so the whole feed is skipped.
- */
+/** A feed's rows without those proven outside the US (`locate` false); a row it cannot place stays. */
 export async function usRows(rows, locate) {
   const inUs = await Promise.all(rows.map(async (r) => (await locate([r.lon, r.lat])) !== false));
   const kept = rows.filter((_, i) => inUs[i]);
-  return { rows: kept, dropped: rows.length - kept.length, outside: rows.length > 0 && kept.length === 0 };
+  return { rows: kept, dropped: rows.length - kept.length };
 }
 
 const V2 = 'events/v2';
@@ -319,7 +316,10 @@ async function refreshFeed(source, prev, { store, known, now, fetchImpl }) {
       return { rows, state: { ...kept, ...attempt, status: 'fresh', coverage: 'complete', lastValidatedAt: iso(now),
         validators: { etag: body.stamp?.etag ?? prev.validators?.etag ?? null, modified: body.stamp?.modified ?? prev.validators?.modified ?? null } } };
     }
-    const rows = source.parse(body.json).filter(Boolean).map((r) => ({ ...r, feed: source.id })).sort(byId);
+    const parsed = source.parse(body.json).filter(Boolean).map((r) => ({ ...r, feed: source.id })).sort(byId);
+    // The US filter runs before anything is stored, so no event outside the US reaches the snapshot, total or bbox.
+    // When it cannot run it throws, and the feed keeps last run's (checked) snapshot as Retained.
+    const rows = source.usFilter ? await source.usFilter(parsed) : parsed;
     const info = body.json.feed_info ?? body.json.road_event_feed_info;
     const published = time(info?.update_date) ?? time(body.stamp.modified);
     return { rows, state: { ...attempt, status: 'fresh', coverage: 'complete', lastValidatedAt: iso(now),
@@ -427,31 +427,26 @@ export async function refreshEvents(store, { fetchImpl = fetch, now = Date.now()
 
   const registry = await loadRegistry(prev?.registry, ctx);
   const locate = await usLocator(fetchImpl);
-  const { kept, skipped } = usOnly(wzdxSources([...registry.rows, ...EXTRA_WZDX], keys), prev ?? {});
-  let sources = [
-    ...kept.map((s) => ({ ...s, parse: (j) => (j.features ?? []).map((f) => normalizeWzdx(f, s)) })),
+  const { kept, skipped } = usOnly(wzdxSources([...registry.rows, ...EXTRA_WZDX], keys));
+  // A feed the registry does not place: its events outside the US are dropped before its snapshot is stored. With the
+  // state lines unreadable it throws, so the feed is Retained on its last checked snapshot (freshness alerts at 24 h).
+  const usFilter = (s) => async (rows) => {
+    const unknown = `::warning::road work ${s.id} (${s.name}): jurisdiction unknown (registry state "${s.state ?? ''}")`;
+    if (!locate) throw new Error('US state lines unreadable; events not checked');
+    if (!rows.length) { console.log(`${unknown} and no events to place it by; kept`); return rows; }
+    const us = await usRows(rows, locate);
+    if (us.dropped) console.log(`::warning::road work ${s.id} (${s.name}): ${us.dropped} of ${rows.length} events outside the US dropped`);
+    return us.rows;
+  };
+  const sources = [
+    ...kept.map((s) => ({ ...s, parse: (j) => (j.features ?? []).map((f) => normalizeWzdx(f, s)), ...(!usStateField(s.state) && { usFilter: usFilter(s) }) })),
     ...CALTRANS.map((url, i) => ({ id: `caltrans-d${i + 1}`, name: 'Caltrans', state: 'california', url, parse: (j) => (j.data ?? []).map((r) => normalizeCaltrans(r)) })),
   ];
   // First v2 run: each feed's area from the v1 index's feedTiles, so a feed down today still
   // marks where it reports. A feed that has never reported anywhere has no area: it shows only in
   // the manifest's coverage, /health/events and freshness.mjs.
   const seeds = prev ? {} : v1Areas(await store.getJson('events/current.json'));
-  const fetched = await Promise.all(sources.map((s) => refreshFeed(s, prev?.feeds?.[s.id] ?? (seeds[s.id] && { bbox: seeds[s.id] }), ctx)));
-  // A feed the registry does not place: its events outside the US are dropped before anything is published, and a feed
-  // with every event outside is skipped and remembered in `skipped`, so it is not fetched again.
-  const outside = await Promise.all(sources.map(async (s, i) => {
-    if (usStateField(s.state)) return false;
-    const unknown = `::warning::road work ${s.id} (${s.name}): jurisdiction unknown (registry state "${s.state ?? ''}")`;
-    if (!locate) { console.log(`${unknown}; US state lines unreadable, kept`); return false; }
-    if (!fetched[i].rows.length) { console.log(`${unknown} and no events to place it by; kept`); return false; }
-    const us = await usRows(fetched[i].rows, locate);
-    if (us.dropped && !us.outside) console.log(`  ${s.id}: ${us.dropped} events outside the US dropped`);
-    fetched[i].rows = us.rows;
-    if (us.outside) skipped[s.id] = { name: s.name, state: s.state ?? null, bbox: fetched[i].state.bbox, reason: OUTSIDE_US };
-    return us.outside;
-  }));
-  const results = fetched.filter((_, i) => !outside[i]);
-  sources = sources.filter((_, i) => !outside[i]);
+  const results = await Promise.all(sources.map((s) => refreshFeed(s, prev?.feeds?.[s.id] ?? (seeds[s.id] && { bbox: seeds[s.id] }), ctx)));
   const feeds = Object.fromEntries(sources.map((s, i) => [s.id, results[i].state]));
 
   const order = new Map(sources.map((s, i) => [s.id, i]));
