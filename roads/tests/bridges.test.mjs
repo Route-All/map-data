@@ -110,3 +110,20 @@ except SystemExit as e: print(json.dumps(str(e)))`);
   assert.deepEqual(built.source, source);
   assert.equal(built.count, 10);
 });
+
+test('bridges: no state grid, no build; a boundaries build in the work folder is read first', () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'bridges-grid-'));
+  const run = (w) => py(`def fail(url): raise OSError('offline')
+B.get = fail
+try: B.main(['bridges.py', ${JSON.stringify(w)}, ${JSON.stringify(SAMPLE)}]); print('null')
+except SystemExit as e: print(json.dumps(str(e)))`);
+  assert.match(run(work), /state grid could not be read/);
+  assert.equal(fs.existsSync(path.join(work, 'bridges.json')), false);
+  // A boundaries build in the work folder (boundaries.mjs layout): the grid reads offline, so the run goes on to write(), which then refuses
+  // the fixture's six states.
+  const key = 'boundaries/v1/objects/abc.json.gz';
+  fs.mkdirSync(path.join(work, 'boundaries', 'objects'), { recursive: true });
+  fs.writeFileSync(path.join(work, 'boundaries', 'manifest.json'), JSON.stringify({ index: { key } }));
+  fs.writeFileSync(path.join(work, 'boundaries', 'objects', 'abc.json.gz'), zlib.gzipSync(JSON.stringify({ schema: 1, cells: { '0_0': 'DE' } })));
+  assert.match(run(work), /6 bridge files for 51 states/);
+});

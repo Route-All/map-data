@@ -64,7 +64,9 @@ def feet(m, unrestricted=30.0):
 
 def dms(s, digits):
     """Items 16/17 as the coding guide has them: DDMMSSss (latitude, 8 digits) or DDDMMSSss (longitude, 9); None when blank or not a number.
-    Minutes or seconds of 60 or more carry, as a rounding state's do: AZ 04191 34437000 is 34 deg 43' 70" = 34.73611, on I-40 where it is."""
+    Minutes or seconds of 60 or more carry, as a rounding state's do: AZ 04191 34437000 is 34 deg 43' 70" = 34.73611, on I-40 where it is.
+    Arizona's values always end in 000, so they may instead be degrees and decimal minutes (34 deg 43.700' = 34.72833): within ~1 km of the
+    carried reading, inside the NBI's own error. TODO: check Arizona against OSM bridges and read DDMM.mmm there if it fits better."""
     s = s.strip()
     if not s.isdigit() or not s.strip('0'): return None
     s = s.zfill(digits); return round(int(s[:-6]) + int(s[-6:-4]) / 60 + int(s[-4:]) / 360000, 5)
@@ -162,7 +164,7 @@ def live_build():
 
 def state_cells(work):
     """The state grid's cells { "row_col": ST | 0 } (format/stateBoundary.mjs): this run's boundaries build when there is one, else the live one;
-    None when neither reads (then location() keeps the DMS-first reading)."""
+    None when neither reads, and main() then stops."""
     try:
         m = os.path.join(work, 'boundaries', 'manifest.json')
         if os.path.exists(m):
@@ -206,12 +208,15 @@ def lines_of(path):
         return io.TextIOWrapper(z.open(name), encoding='latin-1', newline='')
     return open(path, encoding='latin-1', newline='')
 
-if __name__ == '__main__':
-    if len(sys.argv) < 2: sys.exit('usage: python3 bridges.py <work> [<NBI zip or txt>]')
-    work = sys.argv[1]; os.makedirs(work, exist_ok=True)
+def main(argv):
+    if len(argv) < 2: sys.exit('usage: python3 bridges.py <work> [<NBI zip or txt>]')
+    work = argv[1]; os.makedirs(work, exist_ok=True)
+    # Without the grid a decimal-degree row cannot be told from DMS, and what is published stays live until FHWA's next file: stop instead.
+    cells = state_cells(work)
+    if cells is None: sys.exit('bridges: the state grid could not be read (boundaries build or live); not building')
     live = None
-    if len(sys.argv) > 2:
-        path = sys.argv[2]; m = re.search(r'(20\d\d)', os.path.basename(path))
+    if len(argv) > 2:
+        path = argv[2]; m = re.search(r'(20\d\d)', os.path.basename(path))
         source = {'url': None, 'year': int(m.group(1)) if m else None, 'lastModified': None, 'bytes': os.path.getsize(path)}
     else:
         this = datetime.date.today().year
@@ -219,17 +224,18 @@ if __name__ == '__main__':
         if not source: sys.exit('no FHWA NBI file found for the last three years')
         live = live_build()
         if not should_build(source, live and live.get('source')):
-            print(f"bridges: FHWA's {source['year']} file is the one live ({source['lastModified']}); nothing to build"); sys.exit(0)
+            print(f"bridges: FHWA's {source['year']} file is the one live ({source['lastModified']}); nothing to build"); return
         path = os.path.join(work, 'nbi.zip')
         req = urllib.request.Request(source['url'], headers=UA)
         with urllib.request.urlopen(req, timeout=300) as r, open(path, 'wb') as f:
             while chunk := r.read(1 << 20): f.write(chunk)
         if source['bytes'] and os.path.getsize(path) != source['bytes']: sys.exit(f"downloaded {os.path.getsize(path)} bytes, FHWA said {source['bytes']}")
-    cells = state_cells(work)
-    if cells is None: print('bridges: no state grid; coordinates read DMS first, unchecked', file=sys.stderr)
     states, dropped = build(lines_of(path), cells)
-    if len(sys.argv) == 2: os.remove(path)
+    if len(argv) == 2: os.remove(path)
     n = sum(len(b) for b in states.values())
     if short(n, live): sys.exit(f"{n} bridges, under {FLOOR:.0%} of the live build's {live['count']}; not publishing")
     index = write(work, states, source)
     print(f"bridges: {n} in {len(index)} states, {sum(s['bytes'] for s in index.values()) / 1e6:.1f} MB gzip; dropped {dropped}")
+
+if __name__ == '__main__':
+    main(sys.argv)
