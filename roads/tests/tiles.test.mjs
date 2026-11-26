@@ -149,3 +149,15 @@ test('a route crossing a state line is placed on the line, in each direction it 
   const shortB = await wayCrossings(grid, { id: 16, routes: 'US:I|22||forward|', oneway: 'yes', coords: [[-90.0001, 34.4], [-89.9998, 34.4]] });
   assert.deepEqual(table([...shortB.crossings, ...joins([...fwdA.ends, ...shortB.ends])]).map((c) => [c.from, c.to, c.ref]), [['MS', 'AL', '22']]);
 });
+
+test('ways-extra: a DOT name on an unnamed OSM way, by id, only where OSM has none (NC SR-1544 at I-95 exit 145, app trip c45df15b)', () => {
+  const nc = (id, tags) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: [[-77.8198, 36.06283], [-77.82131, 36.06343]] }, properties: { '@id': id, ...tags } });
+  // OSM way 44012812: trunk, unsigned_ref SR 1544, no name. NCDOT: SR-1544 "N Halifax Rd".
+  const named = toLine(nc(44012812, { highway: 'trunk', unsigned_ref: 'SR 1544' }));
+  assert.ok(named.v1.startsWith('44012812\t\tNorth Halifax Road\t'));
+  assert.ok(toLine(nc(758014866, { highway: 'trunk', noname: 'yes', unsigned_ref: 'SR 1544' })).v1.includes('North Halifax Road'));
+  // Never over OSM's own name, never on a way of another class (the id reused or retagged), never on another id.
+  assert.ok(toLine(nc(44012812, { highway: 'trunk', name: 'Gold Rock Road' })).v1.includes('Gold Rock Road'));
+  assert.equal(toLine(nc(44012812, { highway: 'motorway_link' })).v1, null);
+  assert.equal(toLine(nc(44012820, { highway: 'trunk' })).v1, null);
+});
