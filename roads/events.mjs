@@ -26,6 +26,8 @@
 // the same rows after v2. v1 still overwrites stable paths, so an old index can meet a newer tile.
 
 import { sha256, pool } from './store.mjs';
+import { stateAt, decodeJson } from '../format/stateBoundary.mjs';
+import { STATE_CODES } from './pois.mjs';
 
 const REGISTRY = 'https://data.transportation.gov/resource/69qe-yiui.json?$limit=500';
 const CALTRANS = Array.from({ length: 12 }, (_, i) =>
@@ -33,13 +35,26 @@ const CALTRANS = Array.from({ length: 12 }, (_, i) =>
 // Statewide WZDx feeds that work without a key but are missing from USDOT's registry (found
 // 2026-10-21 on the states' 511 sites). Arizona's registry entry is only Maricopa County.
 const EXTRA_WZDX = [
-  { feedname: 'az511', issuingorganization: 'Arizona DOT', url: 'https://az511.com/api/wzdx', active: 'true', needapikey: 'false' },
-  { feedname: 'nvroads', issuingorganization: 'Nevada DOT', url: 'https://www.nvroads.com/api/wzdx', active: 'true', needapikey: 'false' },
+  { feedname: 'az511', issuingorganization: 'Arizona DOT', url: 'https://az511.com/api/wzdx', state: 'arizona', active: 'true', needapikey: 'false' },
+  { feedname: 'nvroads', issuingorganization: 'Nevada DOT', url: 'https://www.nvroads.com/api/wzdx', state: 'nevada', active: 'true', needapikey: 'false' },
 ];
-// RouteAll is US-only (owner, 2026-11-26): registry feeds outside the US are never fetched, published
-// or freshness-checked. Quebec City is the registry's only non-US feed (checked 2026-11-26); its
-// server stopped answering within the 25 s timeout on 2026-11-24, which is what made Freshness fail.
-const NON_US_FEEDS = new Set(['quebec']);
+// RouteAll is US-only (owner, 2026-11-26): nothing outside the US is published. The registry's `state`
+// field names a feed's jurisdiction ("texas", "New Hampshire, Vermont, Maine"). A feed it does not place
+// ("n/a", "nps") is checked event by event against the Census state lines this repo publishes, before
+// its snapshot is stored: events proven outside the US are dropped (and warned about), the feed itself
+// stays and is fetched again next hour, so one bad reading never loses a US feed. Only KNOWN_OUTSIDE
+// feeds are skipped without a fetch (`skipped` in the manifest). Quebec City ("n/a") was the first:
+// its server stopped answering on 2026-11-24 and Freshness failed on it.
+const US_NAMES = new Set([...Object.keys(STATE_CODES), 'puerto-rico', 'guam', 'us-virgin-islands', 'american-samoa', 'northern-mariana-islands']);
+const TILES = 'https://tiles.routeall.app';
+export const OUTSIDE_US = 'outside the US';
+// Quebec City as last seen (2026-11-24, before #39 stopped fetching it), so a run with no record of it skips it too.
+const KNOWN_OUTSIDE = { quebec: { name: 'Quebec City', state: 'n/a', bbox: [-71.43886, 46.74985, -71.16176, 46.91896], reason: OUTSIDE_US } };
+// The Census grid holds the 50 states and DC only (boundaries.mjs). ponytail: territories as boxes
+// (PR, USVI, Guam, CNMI, American Samoa), [west, south, east, north]. The USVI box also takes in the
+// British Virgin Islands (Tortola), which errs toward keeping; the others hold no foreign land.
+const TERRITORIES = [[-67.95, 17.88, -65.22, 18.53], [-65.09, 17.67, -64.56, 18.42], [144.61, 13.23, 144.96, 13.66],
+  [144.88, 14.1, 146.08, 20.56], [-171.1, -14.6, -168.1, -11.0]];
 export const PER_DEGREE = 2;
 const HOUR = 3_600_000;
 // Planned work that has not started yet is shown this far ahead, so a driver planning tonight's
@@ -180,18 +195,74 @@ const KEY_PLACEHOLDER = /INSERT[-_]API[-_]KEY(?:[-_]HERE)?|\[[^\]]*key[^\]]*\]|Y
  * (the WZDX_KEYS secret, feed name → key), with the key put where that feed expects it.
  */
 export function wzdxSources(registry, keys = {}) {
-  return registry.filter((r) => String(r.active) === 'true' && !NON_US_FEEDS.has(r.feedname)).flatMap((r) => {
+  return registry.filter((r) => String(r.active) === 'true').flatMap((r) => {
     let url = r.url?.url ?? r.url;
     if (typeof url !== 'string' || !/^https:\/\//.test(url)) return [];
-    if (String(r.needapikey) !== 'true') return [{ id: r.feedname, name: r.issuingorganization, url }];
+    const base = { id: r.feedname, name: r.issuingorganization, state: r.state ?? null };
+    if (String(r.needapikey) !== 'true') return [{ ...base, url }];
     const key = keys[r.feedname];
     if (!key) return [];
-    if (KEY_HEADER[r.feedname]) return [{ id: r.feedname, name: r.issuingorganization, url, headers: KEY_HEADER[r.feedname](key) }];
+    if (KEY_HEADER[r.feedname]) return [{ ...base, url, headers: KEY_HEADER[r.feedname](key) }];
     if (KEY_PLACEHOLDER.test(url)) url = url.replace(KEY_PLACEHOLDER, encodeURIComponent(key));
     else if (/=$/.test(url)) url += encodeURIComponent(key);
     else return [];
-    return [{ id: r.feedname, name: r.issuingorganization, url }];
+    return [{ ...base, url }];
   });
+}
+
+/** True when every jurisdiction in a registry `state` ("texas", "New Hampshire, Vermont, Maine") is a US one. */
+export const usStateField = (state) => typeof state === 'string' && state.split(',').every((p) => US_NAMES.has(p.trim().toLowerCase().replace(/\s+/g, '-')));
+
+/**
+ * The published Census state lines (boundaries/v1, format/stateBoundary.mjs) as `async ([lon, lat]) → true` (in a US
+ * state, DC or territory), `false` (proven outside: in no state, more than 30 m from every line), or `null` (cannot
+ * tell). Null itself when the lines cannot be read.
+ */
+export async function usLocator(fetchImpl = fetch, origin = TILES) {
+  try {
+    const get = async (key) => {
+      const res = await fetchImpl(`${origin}/${key}`, { signal: AbortSignal.timeout(25_000) });
+      if (!res.ok) throw new Error(`${key}: HTTP ${res.status}`);
+      return res;
+    };
+    const gz = async (key) => decodeJson(new Uint8Array(await (await get(key)).arrayBuffer()));
+    const pointer = await (await get(`boundaries/v1/current.json?t=${Date.now()}`)).json();
+    const manifest = await (await get(pointer.manifest)).json();
+    const index = await gz(manifest.index.key);
+    const blocks = new Map();
+    const getBlock = (k) => {
+      if (!blocks.has(k)) blocks.set(k, manifest.blocks?.[k] ? gz(manifest.blocks[k].key) : Promise.resolve(null));
+      return blocks.get(k);
+    };
+    return async ([lon, lat]) => {
+      if (TERRITORIES.some(([w, s, e, n]) => lon >= w && lon <= e && lat >= s && lat <= n)) return true;
+      // coastMeters 0: a city across a border river (Windsor, Juárez) is outside, not "near the coast".
+      const at = await stateAt(index, getBlock, [lon, lat], { coastMeters: 0 });
+      return at.kind === 'unavailable' ? null : at.kind !== 'outside_us';
+    };
+  } catch (e) {
+    console.log(`::warning::US state lines unreadable (${String(e.message ?? e).slice(0, 120)}); feeds the registry does not place keep their last checked events`);
+    return null;
+  }
+}
+
+/**
+ * Splits sources into those to fetch (`kept`) and the KNOWN_OUTSIDE ones (`skipped`, id → { name, state, bbox,
+ * reason }), which are never fetched. Every other feed is fetched; its events are checked by usRows.
+ */
+export function usOnly(sources) {
+  const kept = [], skipped = {};
+  for (const s of sources) {
+    if (!usStateField(s.state) && KNOWN_OUTSIDE[s.id]) skipped[s.id] = KNOWN_OUTSIDE[s.id]; else kept.push(s);
+  }
+  return { kept, skipped };
+}
+
+/** A feed's rows without those proven outside the US (`locate` false); a row it cannot place stays. */
+export async function usRows(rows, locate) {
+  const inUs = await Promise.all(rows.map(async (r) => (await locate([r.lon, r.lat])) !== false));
+  const kept = rows.filter((_, i) => inUs[i]);
+  return { rows: kept, dropped: rows.length - kept.length };
 }
 
 const V2 = 'events/v2';
@@ -245,7 +316,10 @@ async function refreshFeed(source, prev, { store, known, now, fetchImpl }) {
       return { rows, state: { ...kept, ...attempt, status: 'fresh', coverage: 'complete', lastValidatedAt: iso(now),
         validators: { etag: body.stamp?.etag ?? prev.validators?.etag ?? null, modified: body.stamp?.modified ?? prev.validators?.modified ?? null } } };
     }
-    const rows = source.parse(body.json).filter(Boolean).map((r) => ({ ...r, feed: source.id })).sort(byId);
+    const parsed = source.parse(body.json).filter(Boolean).map((r) => ({ ...r, feed: source.id })).sort(byId);
+    // The US filter runs before anything is stored, so no event outside the US reaches the snapshot, total or bbox.
+    // When it cannot run it throws, and the feed keeps last run's (checked) snapshot as Retained.
+    const rows = source.usFilter ? await source.usFilter(parsed) : parsed;
     const info = body.json.feed_info ?? body.json.road_event_feed_info;
     const published = time(info?.update_date) ?? time(body.stamp.modified);
     return { rows, state: { ...attempt, status: 'fresh', coverage: 'complete', lastValidatedAt: iso(now),
@@ -269,7 +343,7 @@ async function loadRegistry(prev, { store, known, now, fetchImpl }) {
   const attempt = { lastAttemptAt: iso(now) };
   try {
     const rows = (await getBody(REGISTRY, fetchImpl)).json
-      .map(({ feedname, issuingorganization, url, active, needapikey }) => ({ feedname, issuingorganization, url, active, needapikey }));
+      .map(({ feedname, issuingorganization, url, state, active, needapikey }) => ({ feedname, issuingorganization, url, state, active, needapikey }));
     if (!rows.length) throw new Error('registry is empty');
     return { rows, state: { ...attempt, status: 'fresh', coverage: 'complete', lastValidatedAt: iso(now), objectKey: await putObject(store, JSON.stringify(rows), known) } };
   } catch (e) {
@@ -352,9 +426,21 @@ export async function refreshEvents(store, { fetchImpl = fetch, now = Date.now()
   const ctx = { store, known: new Set(prev ? referencedKeys(prev) : []), now, fetchImpl };
 
   const registry = await loadRegistry(prev?.registry, ctx);
+  const locate = await usLocator(fetchImpl);
+  const { kept, skipped } = usOnly(wzdxSources([...registry.rows, ...EXTRA_WZDX], keys));
+  // A feed the registry does not place: its events outside the US are dropped before its snapshot is stored. With the
+  // state lines unreadable it throws, so the feed is Retained on its last checked snapshot (freshness alerts at 24 h).
+  const usFilter = (s) => async (rows) => {
+    const unknown = `::warning::road work ${s.id} (${s.name}): jurisdiction unknown (registry state "${s.state ?? ''}")`;
+    if (!locate) throw new Error('US state lines unreadable; events not checked');
+    if (!rows.length) { console.log(`${unknown} and no events to place it by; kept`); return rows; }
+    const us = await usRows(rows, locate);
+    if (us.dropped) console.log(`::warning::road work ${s.id} (${s.name}): ${us.dropped} of ${rows.length} events outside the US dropped`);
+    return us.rows;
+  };
   const sources = [
-    ...wzdxSources([...registry.rows, ...EXTRA_WZDX], keys).map((s) => ({ ...s, parse: (j) => (j.features ?? []).map((f) => normalizeWzdx(f, s)) })),
-    ...CALTRANS.map((url, i) => ({ id: `caltrans-d${i + 1}`, name: 'Caltrans', url, parse: (j) => (j.data ?? []).map((r) => normalizeCaltrans(r)) })),
+    ...kept.map((s) => ({ ...s, parse: (j) => (j.features ?? []).map((f) => normalizeWzdx(f, s)), ...(!usStateField(s.state) && { usFilter: usFilter(s) }) })),
+    ...CALTRANS.map((url, i) => ({ id: `caltrans-d${i + 1}`, name: 'Caltrans', state: 'california', url, parse: (j) => (j.data ?? []).map((r) => normalizeCaltrans(r)) })),
   ];
   // First v2 run: each feed's area from the v1 index's feedTiles, so a feed down today still
   // marks where it reports. A feed that has never reported anywhere has no area: it shows only in
@@ -378,7 +464,7 @@ export async function refreshEvents(store, { fetchImpl = fetch, now = Date.now()
   const manifest = {
     schema: 2, builtAt: iso(now), perDegree: PER_DEGREE, aheadHours: AHEAD_MS / HOUR, objectPrefix: OBJECTS,
     coverage: states.every((c) => c === 'complete') ? 'complete' : states.every((c) => c === 'unavailable') ? 'unavailable' : 'partial',
-    count: unique.length, registry: registry.state, feeds, tiles: {},
+    count: unique.length, registry: registry.state, feeds, skipped, tiles: {},
   };
   const texts = new Map();
   for (const [key, list] of tiles) {
@@ -403,7 +489,7 @@ export async function refreshEvents(store, { fetchImpl = fetch, now = Date.now()
 
   const written = await writeV1(store, tiles, texts, feeds, manifest);
   const swept = due ? await collectGarbage(store, next, now, holding) : null;
-  return { manifest: manifestKey, coverage: manifest.coverage, count: unique.length, tiles: tiles.size, written, swept,
+  return { manifest: manifestKey, coverage: manifest.coverage, count: unique.length, tiles: tiles.size, written, swept, skipped: Object.keys(skipped),
     unavailable: Object.keys(feeds).filter((id) => feeds[id].status === 'unavailable'),
     retained: Object.keys(feeds).filter((id) => feeds[id].status === 'retained') };
 }
@@ -465,6 +551,10 @@ if (typeof process !== 'undefined' && process.argv?.[1]?.endsWith('events.mjs'))
   const manifest = await store.getJson(result.manifest);
   for (const [id, f] of Object.entries(manifest.feeds).sort()) {
     console.log(`  ${id}: ${f.status === 'unavailable' ? `UNAVAILABLE ${f.error}` : `${f.count} shown of ${f.total}${f.status === 'retained' ? `, RETAINED from ${f.lastValidatedAt} (${f.error})` : ''}`}`);
+    // A source not refreshed this run is a warning annotation on the run, not a failure: the hourly publish goes on
+    // with its last snapshot, and freshness.mjs fails once it is 24 h old.
+    if (f.status !== 'fresh') console.log(`::warning::road work ${id} (${f.name}) not refreshed: ${f.status}, last checked ${f.lastValidatedAt ?? 'never'} (${f.error})`);
   }
+  for (const [id, s] of Object.entries(manifest.skipped ?? {}).sort()) console.log(`::warning::road work ${id} (${s.name}) skipped, not published: ${s.reason}`);
   console.log(JSON.stringify(result), `${Date.now() - started} ms`);
 }
