@@ -354,8 +354,10 @@ test('names: hand-kept DOT numbers on named streets with no ref, only in their b
     way(2, { highway: 'secondary', name: 'Technology Drive' }, line(-79.5818, -79.5790, 40.1950)),
     way(3, { highway: 'secondary', name: 'Old 119' }, line(-79.70, -79.65, 40.40)),
     way(4, { highway: 'secondary', name: 'Technology Drive' }, line(-79.95, -79.90, 40.45)),
+    way(5, { highway: 'secondary', name: 'State Route 3093' }, line(-79.6000, -79.5900, 40.1600)),
   ]);
-  assert.deepEqual(pa.unsigned['SR 3093'], ['OLD 119']);
+  assert.deepEqual(pa.unsigned['SR 3093'].sort(), ['OLD 119', 'STATE ROUTE 3093']);
+  assert.ok(decode(pa.names['STATE ROUTE 3093']['SR 3093']).includes('4015:-7960'));
   assert.deepEqual(pa.unsigned['SR 3095'], ['TECHNOLOGY DRIVE']);
   assert.ok(decode(pa.names['OLD 119']['SR 3093']).includes('4018:-7957'));
   assert.ok(!decode(pa.names['OLD 119']['SR 3093']).some((c) => c.startsWith('4040:')));
@@ -381,4 +383,17 @@ test('names: a DOT name kept by way id (ways-extra) names an unsigned number on 
   assert.deepEqual(nc.unsigned['SR 1544'], ['NORTH HALIFAX ROAD']);
   const cells = decode(nc.names['NORTH HALIFAX ROAD']['SR 1544']);
   assert.ok(cells.includes('3606:-7783') && !cells.some((c) => c.startsWith('3550:')));
+  // Only on a way with `when`'s tags, never over OSM's own name, and only wholly inside the box: Fable's case (the id moved to US 64 at
+  // 35.5,-78.5) and a mapper's merge stretching 44012812 onto the NC 4 ways east of it (1390588251 / 1390588253) both keep OSM's tags.
+  const ncOf = (ways) => { const w2 = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
+    execFileSync('python3', [path.join(DIR, 'names.py'), 'north-carolina', path.join(w2, 'names')], { input: ways.join('\n') + '\n' });
+    return JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(w2, 'names', 'NC.json.gz')))); };
+  const kept = ncOf([
+    way(1314788859, { highway: 'trunk', unsigned_ref: 'SR 1544', name: 'Gold Rock Road' }, [[-77.82219, 36.06367], [-77.82292, 36.06395]]),
+    way(1314788860, { highway: 'trunk_link', unsigned_ref: 'SR 1544' }, [[-77.82292, 36.06395], [-77.82301, 36.06398]]),
+    way(44012812, { highway: 'trunk', ref: 'US 64' }, [[-78.50, 35.50], [-78.49, 35.50]]),
+    way(758014866, { highway: 'trunk', ref: 'NC 4' }, [[-77.8198, 36.06283], [-77.81947, 36.0627], [-77.81467, 36.06083]]),
+  ]);
+  assert.equal(kept.names['NORTH HALIFAX ROAD'], undefined);
+  assert.deepEqual(kept.unsigned['SR 1544'], ['GOLD ROCK ROAD']); // OSM's own name, tied as any unsigned_ref's name is
 });

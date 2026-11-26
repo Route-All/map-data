@@ -143,12 +143,16 @@ def road_class(r):
     return f'{p}{n}{w or ""}'
 ways = {}          # id -> (tags, coords)
 # Hand-kept tags on OSM way ids from a state DOT's open data (ways-extra.json, as tile.mjs reads it): applied only where the way has `when`'s
-# tags and lacks every key the entry sets, never over OSM's own value.
+# tags, lacks every key the entry sets (never over OSM's own value) and lies wholly inside the entry's box [south, west, north, east], so
+# an id a mapper's merge stretches onto other pavement keeps OSM's tags.
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ways-extra.json')) as f:
     WAY_EXTRA = {int(i): e for e in json.load(f)['entries'] for i in e['ways']}
-def with_way_extras(oid, t):
+def with_way_extras(oid, t, coords):
     e = WAY_EXTRA.get(oid)
     if not e or any(t.get(k) != v for k, v in e.get('when', {}).items()) or any(t.get(k) for k in e['set']):
+        return t
+    s, w, n, ea = e['box']
+    if not coords or any(not (s <= y <= n and w <= x <= ea) for x, y in coords):
         return t
     return {**t, **e['set']}
 way_nodes = {}     # id -> node ids, for named ways with a ref (numbered-street names, below)
@@ -166,7 +170,7 @@ for line in sys.stdin:
             m = re.search(r'x(-?[\d.]+)y(-?[\d.]+)', nd)
             if m:
                 coords.append((float(m.group(1)), float(m.group(2))))
-        t = with_way_extras(oid, t)
+        t = with_way_extras(oid, t, coords)
         ways[oid] = (t, coords)
         if t.get('name') and t.get('ref'):
             way_nodes[oid] = [nd.split('x')[0] for nd in (fields.get('N') or '').split(',') if nd]

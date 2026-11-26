@@ -160,4 +160,8 @@ test('ways-extra: a DOT name on an unnamed OSM way, by id, only where OSM has no
   assert.ok(toLine(nc(44012812, { highway: 'trunk', name: 'Gold Rock Road' })).v1.includes('Gold Rock Road'));
   assert.equal(toLine(nc(44012812, { highway: 'motorway_link' })).v1, null);
   assert.equal(toLine(nc(44012820, { highway: 'trunk' })).v1, null);
+  // Only wholly inside the entry's box: the id moved elsewhere (Fable's case), or a mapper's merge stretching it onto the NC 4 ways east of it.
+  const at = (id, tags, coordinates) => toLine({ type: 'Feature', geometry: { type: 'LineString', coordinates }, properties: { '@id': id, ...tags } });
+  assert.ok(!at(44012812, { highway: 'trunk', ref: 'US 64' }, [[-78.5, 35.5], [-78.49, 35.5]]).v1.includes('North Halifax Road'));
+  assert.ok(!at(44012812, { highway: 'trunk', ref: 'NC 4' }, [[-77.82131, 36.06343], [-77.8198, 36.06283], [-77.81467, 36.06083]]).v1.includes('North Halifax Road'));
 });

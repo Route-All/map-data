@@ -30,7 +30,7 @@ const r5 = (x) => Math.round(x * 1e5) / 1e5; // ~1 m, far finer than a route nee
 // One GeoJSON feature from `osmium export` → { v1, v2, keys } (v1 null for an unnamed road), or null to skip it.
 export function toLine(feature) {
   // A DOT's name or number for a way OSM leaves without one (ways-extra.json, NC's SR-1544 at I-95 exit 145).
-  const p = withWayExtras(feature.properties?.['@id'] ?? '', feature.properties ?? {});
+  const p = withWayExtras(feature.properties?.['@id'] ?? '', feature.properties ?? {}, feature.geometry?.coordinates);
   if (NOT_FOR_VEHICLES.has(p.highway) || feature.geometry?.type !== 'LineString') return null;
   const named = Boolean(p.ref || p.name);
   if (!named && !keepUnnamed(p)) return null;
