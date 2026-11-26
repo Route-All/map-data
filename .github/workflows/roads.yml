@@ -140,6 +140,23 @@ jobs:
           [ -f .build/exits.json ] && KIND=exits node publish.mjs || echo "::warning::exits publish failed"
           [ -f .build/frontage.json ] && KIND=frontage node publish.mjs || echo "::warning::frontage publish failed"
 
+      # Bridges (bridges.py): FHWA's National Bridge Inventory, additive like the exits and after them, so it never holds back roads, names or
+      # tiles. The NBI changes once a year: bridges.py compares FHWA's HEAD with the live build's source and stops at once when they match, so a
+      # normal day costs three small requests; a new year's file is a 53 MB download and ~15 MB of uploads. Never fails the run.
+      - name: Build and publish bridges
+        if: steps.source.outputs.newer == 'true'
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          R2_S3_ENDPOINT: ${{ secrets.R2_S3_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_PURGE_TOKEN }}
+        run: |
+          rm -rf .build/bridges .build/bridges.json
+          python3 bridges.py .build || { echo "::warning::bridges build failed"; exit 0; }
+          if [ -f .build/bridges.json ]; then KIND=bridges node publish.mjs || echo "::warning::bridges publish failed"; fi
+
       # Proves THIS run went live, not just that some pointer exists. The query string skips the
       # edge cache. Reads only the public domain.
       - name: Both builds are live
