@@ -6,7 +6,7 @@
 // - a road-work feed's last successful check (lastValidatedAt) is over 24 h old, or it never had one;
 // - a feed's snapshot row count fell more than 50% from the previous manifest (from 20 rows up);
 // - a feed is skipped for any reason but "outside the US", or an active keyless feed in the manifest's registry
-//   copy is in neither `feeds` nor `skipped` (a US feed lost, events.mjs usOnly);
+//   copy is in neither `feeds` nor `skipped` (a US feed lost, events.mjs usOnly); a manifest with no registry copy is a WARN line;
 // - the road build is 35 days old, or fuel prices are over 15 days old.
 // Reads only public files, so it needs no credentials.
 import fs from 'node:fs';
@@ -51,6 +51,8 @@ await check('events', async () => {
   for (const [id, s] of Object.entries(manifest.skipped ?? {}).sort()) {
     if (s.reason !== 'outside the US') alerts.push(`events/${id}: skipped (${s.reason})`);
   }
+  // No registry copy (USDOT's registry has never loaded): nothing to check lost feeds against, said rather than passed silently.
+  if (!manifest.registry?.objectKey) console.log(`WARN events: the manifest has no registry copy (${manifest.registry?.error ?? manifest.registry?.status ?? 'none'}); lost feeds not checked`);
   const registry = manifest.registry?.objectKey ? await get(manifest.registry.objectKey) : [];
   for (const r of registry) {
     const url = r.url?.url ?? r.url;
