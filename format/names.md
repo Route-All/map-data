@@ -47,7 +47,7 @@ file whose size or SHA-256 differs from the pointer.
   pavement no tie above can reach because the way has no name (NC's SR-1544 "N Halifax Rd" at I-95 exit 145 is unnamed trunk in OSM).
   Applied by both the road tiles (tile.mjs) and this index (names.py), only where the way has the entry's `when` tags, lacks every key
   it sets that `when` does not pin, and lies wholly inside the entry's `box`: never over OSM's own value save the one `when` names (IL's
-  "IL 64" that IDOT's inventory shows is IL 26 and IL 64; a NY street TIGER names "Robinson Ave"), a no-op once OSM has it or changes it,
+  "IL 64" that IDOT's inventory shows is IL 26 and IL 64), a no-op once OSM has it or changes it,
   and dropped if a merge stretches the id onto other pavement.
 - `aliases[printed ref][map ref]`: squares where pavement the map refs as `map ref` is also `printed ref`, so a permit that prints
   one is read on pavement labelled the other. Sources: a way's or route relation's `old_ref` / `fut_ref` / `official_ref` /

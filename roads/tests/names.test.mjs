@@ -380,15 +380,43 @@ test('names: hand-kept DOT numbers on named streets with no ref, only in their b
   assert.ok(!decode(pa2004.names['CROWS RUN ROAD']['SR 2004']).some((c) => c.startsWith('4075:')));
 });
 
-test('names: a ways-extra ref replacing the one `when` pins reaches the index (IL 26 on IL 64 in Ogle County, app trip 0cb1a4cf)', () => {
-  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
-  execFileSync('python3', [path.join(DIR, 'names.py'), 'illinois', path.join(work, 'names')], { input: [
-    way(1222619589, { highway: 'primary', ref: 'IL 64', name: 'Il Route 26' }, [[-89.58763, 42.04792], [-89.58772, 42.05477]]),
-    way(21975765, { highway: 'primary', ref: 'IL 64', name: 'Il Route 64' }, [[-89.58721, 42.04765], [-89.5082, 42.04851]]),
-  ].join('\n') + '\n' });
-  const il = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'names', 'IL.json.gz'))));
-  assert.ok(Object.keys(il.names['IL ROUTE 26'] ?? {}).includes('IL 26'));
-  assert.ok(!Object.keys(il.names['IL ROUTE 64'] ?? {}).includes('IL 26')); // IL 64's own leg east keeps its one number
+// names.py with names-extra.json's entries for `ref` taken out, to show an entry is a no-op once OSM carries what it adds.
+const runWithout = (ref, state, opl) => { const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'names-bare-'));
+  fs.copyFileSync(path.join(DIR, 'names.py'), path.join(bare, 'names.py'));
+  fs.copyFileSync(path.join(DIR, 'ways-extra.json'), path.join(bare, 'ways-extra.json'));
+  const extra = JSON.parse(fs.readFileSync(path.join(DIR, 'names-extra.json')));
+  fs.writeFileSync(path.join(bare, 'names-extra.json'), JSON.stringify({ ...extra, entries: extra.entries.filter((e) => e.ref !== ref) }));
+  execFileSync('python3', [path.join(bare, 'names.py'), state, path.join(bare, 'out')], { input: opl.join('\n') + '\n' });
+  return JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(bare, 'out', fs.readdirSync(path.join(bare, 'out'))[0])))); };
+const runNames = (state, opl) => { const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
+  execFileSync('python3', [path.join(DIR, 'names.py'), state, path.join(work, 'names')], { input: opl.join('\n') + '\n' });
+  return JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'names', fs.readdirSync(path.join(work, 'names'))[0])))); };
+
+test('names: PA SR 2004 entry is a no-op once OSM tags ref:penndot SR 2004 (changeset 192519648)', () => {
+  // Live OSM, 2026-11-27: Crows Run Road 542652844 and Freedom Crider Road 19324612 carry ref:penndot "SR 2004".
+  const opl = [
+    way(542652844, { highway: 'primary', name: 'Crows Run Road', 'ref:penndot': 'SR 2004' }, line(-80.2440, -80.2262, 40.6760)),
+    way(19324612, { highway: 'primary', name: 'Freedom Crider Road', 'ref:penndot': 'SR 2004' }, line(-80.2262, -80.2100, 40.6830)),
+  ];
+  const tagged = runNames('pennsylvania', opl);
+  assert.deepEqual(tagged.unsigned['SR 2004'], ['CROWS RUN ROAD', 'FREEDOM CRIDER ROAD']);
+  assert.deepEqual(tagged, runWithout('SR 2004', 'pennsylvania', opl));
+});
+
+test('names: IL 26 on the IL 64 overlap, ways-extra ref = what OSM now tags, inert after (app trip 0cb1a4cf)', () => {
+  // Live OSM: the three overlap ways have no `name` (TIGER's only in tiger:name_base) and are members of US:IL 26 (1618727) and
+  // US:IL 64 (112042). Before 2026-11-27 they were ref "IL 64"; now "IL 26;IL 64".
+  const tiger = { 'tiger:name_base': 'Il Route 26', 'tiger:county': 'Ogle, IL' };
+  const opl = (ref) => [
+    way(1222619589, { highway: 'primary', ref, ...tiger }, [[-89.58763, 42.04792], [-89.58772, 42.05477]]),
+    way(21975765, { highway: 'primary', ref: 'IL 64', 'tiger:name_base': 'Illinois Route 64' }, [[-89.58721, 42.04765], [-89.5082, 42.04851]]),
+    rel(1618727, { type: 'route', route: 'road', network: 'US:IL', ref: '26' }, [1222619589]),
+    rel(112042, { type: 'route', route: 'road', network: 'US:IL', ref: '64' }, [1222619589, 21975765]),
+  ];
+  const before = runNames('illinois', opl('IL 64')), after = runNames('illinois', opl('IL 26;IL 64'));
+  assert.deepEqual(before, after); // the overlay gives the index exactly OSM's fix, and adds nothing once OSM has it
+  assert.equal(after.aliases['IL 26'], undefined); // IL 26 is the way's own ref there, no alias needed
+  assert.equal(after.names['IL ROUTE 26'], undefined); // no name is made up: OSM has none
 });
 
 test('names: a DOT name kept by way id (ways-extra) names an unsigned number on an unnamed way (NC SR-1544, map-gaps-1127)', () => {
