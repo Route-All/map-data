@@ -85,6 +85,14 @@ def text(v):
 
 # One entry per state: the layers (ArcGIS REST, queried as JSON in WGS84), the filter, and row(attributes) -> (route, mp, county, dir) or None.
 DISCLAIMER = 'open data; the publisher disclaims accuracy and asks to be credited as the source'
+def ia_own_post(a):
+    """True unless the row's post name belongs to another route or direction ("680E-12" on an I-29 row)."""
+    name = str(a.get('REFERENCE_POST_NAME') or '')
+    if '-' not in name:
+        return True
+    return name.split('-', 1)[0].upper() == f"{a.get('OFFICIAL_ROUTE_NUMBER')}{a.get('OFFICIAL_ROUTE_DIRECTION') or ''}".upper()
+
+
 SOURCES = {
   'SD': {'layers': ['https://sdgis.sd.gov/dot/rest/services/TIM/DOT_MileageReferenceMarkers/FeatureServer/0'], 'where': "data_class='1'",
          'licence': 'South Dakota DOT Mileage Reference Markers; ' + DISCLAIMER,
@@ -105,14 +113,17 @@ SOURCES = {
                           if len(a['ROUTE_ID'] or '') >= 18 and a['ROUTE_ID'][:2] in ('01', '02', '03') else None},
   'IA': {'layers': ['https://gis.iowadot.gov/agshost/rest/services/RAMS/Reference_Posts/FeatureServer/0'], 'where': 'EFFECTIVE_END_DATE IS NULL',
          'licence': 'Iowa DOT Reference Posts; CC BY 4.0',
+         # REFERENCE_POST_NAME is "<route><dir>-<post>" ("29S-0"). A few virtual rows name another route's post ("680E-12" on I-29): that is the
+         # other route's marker, not this one's, and is left out.
          'row': lambda a: (ref(a['OFFICIAL_ROUTE_PREFIX'], a['OFFICIAL_ROUTE_NUMBER'], 'IA') if a['OFFICIAL_ROUTE_PREFIX'] else None,
-                           num(a['REFERENCE_POST_VALUE']), None, text(a['OFFICIAL_ROUTE_DIRECTION']))},
+                           num(a['REFERENCE_POST_VALUE']), None, text(a['OFFICIAL_ROUTE_DIRECTION']))
+                          if ia_own_post(a) else None},
   'ID': {'layers': ['https://gisp.itd.idaho.gov/server/rest/services/GDWarehouse/Assets/FeatureServer/3'], 'where': '1=1',
          'licence': 'Idaho Transportation Department Mile Post Signs; ' + DISCLAIMER,
-         # Mainline signs only: a LoopSpur row ("Blackfoot": the I-15 business loop) carries the parent's RouteName, and an "Equation" row is where the
+         # Mainline signs only (RouteType 'Main Route'; a Spur row can have LoopSpur 'None', US-93 RID 02540AUS093): a LoopSpur row ("Blackfoot": the I-15 business loop) carries the parent's RouteName, and an "Equation" row is where the
          # mileage jumps, no sign ("Mile Marker/Equation" is a sign there, kept).
          'row': lambda a: (named(a['RouteName'], 'ID'), num(a['MilePostSigns']), None, text(a['TravelDirection']))
-                          if a.get('MilePostType') != 'Equation' and str(a.get('LoopSpur') or 'None') == 'None' else None},
+                          if a.get('MilePostType') != 'Equation' and a.get('RouteType') == 'Main Route' else None},
   # Interstates, US routes, state routes (layers 0-2); POST_NAME "U_41_204" is US-41 post 204.
   'IN': {'layers': [f'https://gis.indot.in.gov/ro/rest/services/DOT/ReferencePosts/FeatureServer/{i}' for i in (0, 1, 2)], 'where': '1=1',
          'licence': 'INDOT Reference Posts; ' + DISCLAIMER,

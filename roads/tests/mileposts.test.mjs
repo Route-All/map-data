@@ -103,7 +103,7 @@ print(json.dumps([sorted(files), notes]))`);
   assert.deepEqual(got, [[], ['NC: licence unverified, not published']]);
 });
 
-test('mileposts: route variants keep their own ref, never the mainline (review: SD, MN, ID, NC, ND, NV, OSM CR)', () => {
+test('mileposts: route variants keep their own ref, never the mainline (review: SD, MN, ID spurs, IA foreign posts, NC, ND, NV, OSM CR)', () => {
   const got = py(`S_ = M.SOURCES
 print(json.dumps([
   S_['SD']['row']({'highway': '016 ', 'suffix_hwy_type': 'B', 'highway_category': 'US', 'mrm': '040.54', 'county': 'PENNINGTON', 'direction': ''})[0],
@@ -111,15 +111,18 @@ print(json.dumps([
   S_['SD']['row']({'highway': '014A', 'suffix_hwy_type': '', 'highway_category': 'US', 'mrm': '041.95', 'county': 'LAWRENCE', 'direction': ''})[0],
   S_['MN']['row']({'ROUTE_ID': '5200000000000010-D', 'REFERENCE_POST': '001'}),           # not a trunk highway: no "MN 10"
   S_['MN']['row']({'ROUTE_ID': '0200000000000002BD', 'REFERENCE_POST': '012'})[0],        # US 2 business
-  S_['ID']['row']({'RouteName': 'I-15', 'MilePostSigns': '93', 'TravelDirection': '', 'MilePostType': 'Mile Marker', 'LoopSpur': 'Blackfoot'}),
-  S_['ID']['row']({'RouteName': 'I-84', 'MilePostSigns': '50', 'TravelDirection': '', 'MilePostType': 'Equation', 'LoopSpur': 'None'}),
-  S_['ID']['row']({'RouteName': 'I-84', 'MilePostSigns': '50', 'TravelDirection': 'I', 'MilePostType': 'Mile Marker/Equation', 'LoopSpur': 'None'})[0],
+  S_['ID']['row']({'RouteName': 'I-15', 'MilePostSigns': '93', 'TravelDirection': '', 'MilePostType': 'Mile Marker', 'LoopSpur': 'Blackfoot', 'RouteType': 'Business Loop'}),
+  S_['ID']['row']({'RouteName': 'I-84', 'MilePostSigns': '50', 'TravelDirection': '', 'MilePostType': 'Equation', 'LoopSpur': 'None', 'RouteType': 'Main Route'}),
+  S_['ID']['row']({'RouteName': 'I-84', 'MilePostSigns': '50', 'TravelDirection': 'I', 'MilePostType': 'Mile Marker/Equation', 'LoopSpur': 'None', 'RouteType': 'Main Route'})[0],
+  S_['ID']['row']({'RouteName': 'US-93', 'MilePostSigns': '0', 'TravelDirection': '', 'MilePostType': 'Mile Marker', 'LoopSpur': 'None', 'RouteType': 'Spur'}),
+  S_['IA']['row']({'OFFICIAL_ROUTE_PREFIX': 'I', 'OFFICIAL_ROUTE_NUMBER': 29, 'OFFICIAL_ROUTE_DIRECTION': 'S', 'REFERENCE_POST_VALUE': '12', 'REFERENCE_POST_NAME': '680E-12'}),
+  S_['IA']['row']({'OFFICIAL_ROUTE_PREFIX': 'I', 'OFFICIAL_ROUTE_NUMBER': 29, 'OFFICIAL_ROUTE_DIRECTION': 'S', 'REFERENCE_POST_VALUE': '12', 'REFERENCE_POST_NAME': '29S-12'})[0],
   S_['NC']['row']({'RouteName': 'US-70 Bypass', 'SignMP': '5', 'County': 'Johnston', 'RouteDirection': 'E'})[0],
   S_['ND']['row']({'RTE_SIN': 'S', 'HWY': 200, 'RTE_SUFFIX': 'A', 'REF_PT_NUM': 955.0, 'DIRECTION': 'E'})[0],
   M.nv_route('IR580N'), M.nv_route('US095AN'), M.nv_route('SR028'),
   M.named('CR 12', 'SD'), M.named('AU-9005', 'KY'), M.named('M-59', 'MI'), M.named('M-59', 'NC'), M.num('nan'), M.num('inf'),
 ]))`);
-  assert.deepEqual(got, ['US 16B', 'I 90L', 'US 14A', null, 'US 2B', null, null, 'I 84', 'US 70 Bypass', 'ND 200A',
+  assert.deepEqual(got, ['US 16B', 'I 90L', 'US 14A', null, 'US 2B', null, null, 'I 84', null, null, 'I 29', 'US 70 Bypass', 'ND 200A',
     ['I 580', 'N'], ['US 95A', 'N'], ['NV 28', null], null, null, 'MI 59', null, null, null]);
 });
 
