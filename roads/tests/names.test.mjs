@@ -397,3 +397,19 @@ test('names: a DOT name kept by way id (ways-extra) names an unsigned number on 
   assert.equal(kept.names['NORTH HALIFAX ROAD'], undefined);
   assert.deepEqual(kept.unsigned['SR 1544'], ['GOLD ROCK ROAD']); // OSM's own name, tied as any unsigned_ref's name is
 });
+
+test('names: NCDOT permits print NC-42 for Veterans Parkway, NC 36 on its own inventory and OSM, I-42 exit 320 to I-40 exit 312 (app trip k-16ed9e627f477b8a)', () => {
+  const run = (state, opl) => { const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
+    execFileSync('python3', [path.join(DIR, 'names.py'), state, path.join(work, 'names')], { input: opl.join('\n') + '\n' });
+    return JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'names', fs.readdirSync(path.join(work, 'names'))[0])))); };
+  const nc = run('north-carolina', [
+    way(1, { highway: 'secondary', ref: 'NC 36', name: 'Veterans Parkway' }, line(-78.565, -78.510, 35.615)),
+    way(2, { highway: 'secondary', ref: 'NC 36', name: 'Veterans Parkway' }, line(-78.480, -78.460, 35.660)),
+    way(3, { highway: 'secondary', ref: 'NC 42' }, line(-78.440, -78.380, 35.640)),
+  ]);
+  assert.deepEqual(Object.keys(nc.aliases['NC 42']), ['NC 36']);
+  const sq = decode(nc.aliases['NC 42']['NC 36']);
+  assert.ok(sq.includes('3561:-7856') && sq.includes('3561:-7852'));
+  assert.ok(!sq.some((c) => c.startsWith('3566:')));
+  assert.ok(nc.names['VETERANS PARKWAY']['NC 42']);
+});
