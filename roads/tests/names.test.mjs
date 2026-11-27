@@ -398,18 +398,24 @@ test('names: a DOT name kept by way id (ways-extra) names an unsigned number on 
   assert.deepEqual(kept.unsigned['SR 1544'], ['GOLD ROCK ROAD']); // OSM's own name, tied as any unsigned_ref's name is
 });
 
-test('names: NCDOT permits print NC-42 for Veterans Parkway, NC 36 on its own inventory and OSM, I-42 exit 320 to I-40 exit 312 (app trip k-16ed9e627f477b8a)', () => {
+test('names: NCDOT permits print NC-42 for Veterans Parkway (NC 36): OSM old_ref NC 42 ties it, no names-extra entry (app trip k-16ed9e627f477b8a)', () => {
+  // Live OSM tags (2026-11-26): every Veterans Pkwy way is ref NC 36 + old_ref NC 42 (way 43720782, changeset 182912995); live NC 42
+  // ends at -78.5992 (way 628745031); the I-42 mainline is "I 42;NC 36" with old_ref US 70 (way 37995670). The trip's NC-42 leg runs
+  // from exit 320 (-78.51) to Glen Rd (SR 1547, -78.566).
   const run = (state, opl) => { const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
     execFileSync('python3', [path.join(DIR, 'names.py'), state, path.join(work, 'names')], { input: opl.join('\n') + '\n' });
     return JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'names', fs.readdirSync(path.join(work, 'names'))[0])))); };
   const nc = run('north-carolina', [
-    way(1, { highway: 'secondary', ref: 'NC 36', name: 'Veterans Parkway' }, line(-78.565, -78.510, 35.615)),
-    way(2, { highway: 'secondary', ref: 'NC 36', name: 'Veterans Parkway' }, line(-78.480, -78.460, 35.660)),
-    way(3, { highway: 'secondary', ref: 'NC 42' }, line(-78.440, -78.380, 35.640)),
+    way(1, { highway: 'secondary', ref: 'NC 36', old_ref: 'NC 42', name: 'Veterans Parkway' }, line(-78.566, -78.512, 35.61)),
+    way(2, { highway: 'secondary', ref: 'NC 36', old_ref: 'NC 42', name: 'North Carolina Highway 36' }, line(-78.599, -78.574, 35.605)),
+    way(3, { highway: 'secondary', ref: 'NC 42', name: 'North Carolina Highway 42' }, line(-78.635, -78.5992, 35.593)),
+    way(4, { highway: 'motorway', ref: 'I 42;NC 36', old_ref: 'US 70', name: 'Clayton Bypass Scenic Byway' }, line(-78.5052, -78.4838, 35.619)),
   ]);
   assert.deepEqual(Object.keys(nc.aliases['NC 42']), ['NC 36']);
   const sq = decode(nc.aliases['NC 42']['NC 36']);
-  assert.ok(sq.includes('3561:-7856') && sq.includes('3561:-7852'));
-  assert.ok(!sq.some((c) => c.startsWith('3566:')));
+  assert.ok(sq.includes('3561:-7857') && sq.includes('3561:-7852')); // the whole leg, exit 320 to Glen Rd
+  assert.ok(!sq.some((c) => Number(c.split(':')[1]) <= -7858)); // beside live NC 42 (OLD_REACH): left out, off the trip
   assert.ok(nc.names['VETERANS PARKWAY']['NC 42']);
+  assert.equal(nc.names['CLAYTON BYPASS SCENIC BYWAY']['NC 42'], undefined); // the I 42;NC 36 mainline is not NC 42
+  assert.ok(!JSON.parse(fs.readFileSync(path.join(DIR, 'names-extra.json'))).entries.some((e) => e.ref === 'NC 42'));
 });
