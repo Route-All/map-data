@@ -143,13 +143,14 @@ def road_class(r):
     return f'{p}{n}{w or ""}'
 ways = {}          # id -> (tags, coords)
 # Hand-kept tags on OSM way ids from a state DOT's open data (ways-extra.json, as tile.mjs reads it): applied only where the way has `when`'s
-# tags, lacks every key the entry sets (never over OSM's own value) and lies wholly inside the entry's box [south, west, north, east], so
-# an id a mapper's merge stretches onto other pavement keeps OSM's tags.
+# tags, lacks every key the entry sets that `when` does not pin (never over OSM's own value, save the one `when` names: once OSM changes it
+# the entry is inert) and lies wholly inside the entry's box [south, west, north, east], so an id a mapper's merge stretches onto other
+# pavement keeps OSM's tags.
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ways-extra.json')) as f:
     WAY_EXTRA = {int(i): e for e in json.load(f)['entries'] for i in e['ways']}
 def with_way_extras(oid, t, coords):
     e = WAY_EXTRA.get(oid)
-    if not e or any(t.get(k) != v for k, v in e.get('when', {}).items()) or any(t.get(k) for k in e['set']):
+    if not e or any(t.get(k) != v for k, v in e.get('when', {}).items()) or any(t.get(k) for k in e['set'] if k not in e.get('when', {})):
         return t
     s, w, n, ea = e['box']
     if not coords or any(not (s <= y <= n and w <= x <= ea) for x, y in coords):

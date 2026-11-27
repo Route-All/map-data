@@ -18,6 +18,8 @@
     { "state": "PA", "ref": "SR 3095", "names": ["TECHNOLOGY DRIVE"], "box": [40.188, -79.584, 40.202, -79.577],
       "source": "PennDOT RMS: SR 3095 segs 0010-0021 are Technology Dr from SR 3093 (Old 119) to the US 119 ramps (SR 8005), Westmoreland Technology Park; OSM 'Technology Drive' ways 70843053, 70843346, 643222623, within 3 m of the PennDOT line, no ref:penndot (app trip 41f03819)" },
     { "state": "TX", "ref": "US 59", "names": ["NORTH TEMPLE DRIVE"], "box": [31.196, -94.782, 31.2065, -94.774],
-      "source": "TxDOT Roadways: North Temple Drive at Diboll is BU0059H, where FM 2497 begins (31.20414,-94.77662); TxDOT's permits still print it US0059 ('US0059, 0.3mi S of US0059 & FM 2497', app trip 3f0684fe). Only the 0.6 mi beside the FM 2497 junction, off the US 59 Diboll Relief Route; OSM ways 1432687523-1432687529 carry no ref" }
+      "source": "TxDOT Roadways: North Temple Drive at Diboll is BU0059H, where FM 2497 begins (31.20414,-94.77662); TxDOT's permits still print it US0059 ('US0059, 0.3mi S of US0059 & FM 2497', app trip 3f0684fe). Only the 0.6 mi beside the FM 2497 junction, off the US 59 Diboll Relief Route; OSM ways 1432687523-1432687529 carry no ref" },
+    { "state": "PA", "ref": "SR 2004", "names": ["CROWS RUN ROAD"], "box": [40.6700, -80.2452, 40.6822, -80.2252],
+      "source": "PennDOT RMS (opendata roadwaysegments, Beaver County 04): SR 2004 segs 0012-0042 are Crows Run Rd from PA 65 at Conway (40.67069,-80.24452) to Freedom Crider Rd (40.68161,-80.22598), where segs 0050+ go on as Freedom Crider Rd; OSM 'Crows Run Road' (542652844, primary, the only way of that name within 2 km) lies within 8 m of the PennDOT line and carries no ref:penndot. The permit prints 'SR-2004 W ... FREEDOM CRIDER RD ... to SR0065' (app trip ee191c34); without the tie the walk took Freedom Crider Road's tertiary stub to Lovi Rd, which PennDOT does not number" }
   ]
 }

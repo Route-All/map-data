@@ -370,6 +370,25 @@ test('names: hand-kept DOT numbers on named streets with no ref, only in their b
   assert.deepEqual(tx.unsigned['US 59'], ['NORTH TEMPLE DRIVE']);
   assert.ok(decode(tx.names['NORTH TEMPLE DRIVE']['US 59']).includes('3120:-9478'));
   assert.ok(!decode(tx.names['NORTH TEMPLE DRIVE']['US 59']).some((c) => c.startsWith('3118:')));
+  // PA trip ee191c34: PennDOT's SR 2004 runs on from Freedom Crider Rd as Crows Run Rd to PA 65 at Conway; a Crows Run Road elsewhere is not it.
+  const pa2004 = run('pennsylvania', [
+    way(1, { highway: 'primary', name: 'Crows Run Road' }, line(-80.2440, -80.2262, 40.6760)),
+    way(2, { highway: 'residential', name: 'Crows Run Road' }, line(-80.10, -80.09, 40.75)),
+  ]);
+  assert.deepEqual(pa2004.unsigned['SR 2004'], ['CROWS RUN ROAD']);
+  assert.ok(decode(pa2004.names['CROWS RUN ROAD']['SR 2004']).includes('4067:-8024'));
+  assert.ok(!decode(pa2004.names['CROWS RUN ROAD']['SR 2004']).some((c) => c.startsWith('4075:')));
+});
+
+test('names: a ways-extra ref replacing the one `when` pins reaches the index (IL 26 on IL 64 in Ogle County, app trip 0cb1a4cf)', () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'names-'));
+  execFileSync('python3', [path.join(DIR, 'names.py'), 'illinois', path.join(work, 'names')], { input: [
+    way(1222619589, { highway: 'primary', ref: 'IL 64', name: 'Il Route 26' }, [[-89.58763, 42.04792], [-89.58772, 42.05477]]),
+    way(21975765, { highway: 'primary', ref: 'IL 64', name: 'Il Route 64' }, [[-89.58721, 42.04765], [-89.5082, 42.04851]]),
+  ].join('\n') + '\n' });
+  const il = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(work, 'names', 'IL.json.gz'))));
+  assert.ok(Object.keys(il.names['IL ROUTE 26'] ?? {}).includes('IL 26'));
+  assert.ok(!Object.keys(il.names['IL ROUTE 64'] ?? {}).includes('IL 26')); // IL 64's own leg east keeps its one number
 });
 
 test('names: a DOT name kept by way id (ways-extra) names an unsigned number on an unnamed way (NC SR-1544, map-gaps-1127)', () => {

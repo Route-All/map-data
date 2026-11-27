@@ -165,3 +165,22 @@ test('ways-extra: a DOT name on an unnamed OSM way, by id, only where OSM has no
   assert.ok(!at(44012812, { highway: 'trunk', ref: 'US 64' }, [[-78.5, 35.5], [-78.49, 35.5]]).v1.includes('North Halifax Road'));
   assert.ok(!at(44012812, { highway: 'trunk', ref: 'NC 4' }, [[-77.82131, 36.06343], [-77.8198, 36.06283], [-77.81467, 36.06083]]).v1.includes('North Halifax Road'));
 });
+
+test('ways-extra: a value `when` pins is replaced, only while OSM still has it (IL 26 on IL 64, NY Robinson Ave; app trips 0cb1a4cf, k-7d9bc2a6)', () => {
+  const at = (id, tags, coordinates) => toLine({ type: 'Feature', geometry: { type: 'LineString', coordinates }, properties: { '@id': id, ...tags } });
+  // IDOT: IL 26 and IL 64 share the 0.5 mi at -89.5877 (Ogle County); OSM refs it "IL 64" only.
+  const il = [[-89.58763, 42.04792], [-89.58772, 42.05477]];
+  assert.ok(at(1222619589, { highway: 'primary', ref: 'IL 64' }, il).v1.startsWith('1222619589\tIL 26;IL 64\t'));
+  // Once OSM has another ref there (fixed, or renumbered), the entry is inert; and never on another class or outside the box.
+  assert.ok(at(1222619589, { highway: 'primary', ref: 'IL 26;IL 64' }, il).v1.startsWith('1222619589\tIL 26;IL 64\t'));
+  assert.ok(at(1222619589, { highway: 'primary', ref: 'IL 72' }, il).v1.startsWith('1222619589\tIL 72\t'));
+  assert.ok(at(1222619589, { highway: 'secondary', ref: 'IL 64' }, il).v1.startsWith('1222619589\tIL 64\t'));
+  assert.ok(at(1222619589, { highway: 'primary', ref: 'IL 64' }, [[-89.58763, 42.04792], [-89.50, 42.0485]]).v1.startsWith('1222619589\tIL 64\t'));
+  // TIGER's Robinson Ave in Hadley, NY: OSM names that way Longview Terrace.
+  const ny = [[-74.006889, 43.2900447], [-74.0035812, 43.2896131]];
+  assert.ok(at(353022424, { highway: 'residential', name: 'Longview Terrace', access: 'private' }, ny).v1.includes('\tRobinson Avenue\t'));
+  assert.ok(at(353022424, { highway: 'residential', name: 'Robinson Avenue' }, ny).v1.includes('\tRobinson Avenue\t'));
+  assert.ok(at(353022424, { highway: 'residential', name: 'Hurley Terrace' }, ny).v1.includes('\tHurley Terrace\t'));
+  // A key `when` does not pin is still never written over OSM's value (NC: OSM's own name wins).
+  assert.ok(at(44012812, { highway: 'trunk', name: 'Gold Rock Road' }, [[-77.8198, 36.06283], [-77.82131, 36.06343]]).v1.includes('Gold Rock Road'));
+});
