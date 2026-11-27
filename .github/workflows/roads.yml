@@ -157,6 +157,23 @@ jobs:
           python3 bridges.py .build || { echo "::warning::bridges build failed"; exit 0; }
           if [ -f .build/bridges.json ]; then KIND=bridges node publish.mjs || echo "::warning::bridges publish failed"; fi
 
+      # Mile markers (mileposts.py): the state DOTs' open milepost / reference-post layers plus the OSM milestones build.sh exported, additive like
+      # the bridges and after them. A layer whose edit date matches the live build's is not downloaded again, and when every state's file is the
+      # live one byte for byte nothing is written or uploaded (a normal day). A failing layer keeps its state's live rows. Never fails the run.
+      - name: Build and publish mileposts
+        if: steps.source.outputs.newer == 'true'
+        continue-on-error: true
+        timeout-minutes: 30
+        env:
+          R2_S3_ENDPOINT: ${{ secrets.R2_S3_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_PURGE_TOKEN }}
+        run: |
+          rm -rf .build/mileposts .build/mileposts.json
+          python3 mileposts.py .build || { echo "::warning::mileposts build failed"; exit 0; }
+          if [ -f .build/mileposts.json ]; then KIND=mileposts node publish.mjs || echo "::warning::mileposts publish failed"; fi
+
       # Proves THIS run went live, not just that some pointer exists. The query string skips the
       # edge cache. Reads only the public domain.
       - name: Both builds are live
