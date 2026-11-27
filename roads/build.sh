@@ -14,7 +14,7 @@ STATES=${STATES:-"alabama alaska arizona arkansas california colorado connecticu
   ohio oklahoma oregon pennsylvania rhode-island south-carolina south-dakota tennessee texas utah vermont virginia
   washington west-virginia wisconsin wyoming"}
 WORK=${WORK:-.build}
-rm -rf "$WORK/routed.jsonl" "$WORK/raw" "$WORK/raw2" "$WORK/tiles" "$WORK/tiles2" "$WORK/manifest2.json" "$WORK/sources.txt" "$WORK/build.json" "$WORK/pois-raw" "$WORK/pois" "$WORK/pois.json" "$WORK/extras.jsonl" "$WORK/signs.jsonl" "$WORK/weigh-station-gaps.geojson" "$WORK/signals-raw.csv" "$WORK/signals" "$WORK/signals.json" "$WORK/names" "$WORK/names.json" "$WORK/exits" "$WORK/frontage" "$WORK/frontage.json"
+rm -rf "$WORK/routed.jsonl" "$WORK/raw" "$WORK/raw2" "$WORK/tiles" "$WORK/tiles2" "$WORK/manifest2.json" "$WORK/sources.txt" "$WORK/build.json" "$WORK/pois-raw" "$WORK/pois" "$WORK/pois.json" "$WORK/extras.jsonl" "$WORK/signs.jsonl" "$WORK/weigh-station-gaps.geojson" "$WORK/signals-raw.csv" "$WORK/signals" "$WORK/signals.json" "$WORK/names" "$WORK/names.json" "$WORK/exits" "$WORK/frontage" "$WORK/frontage.json" "$WORK/milestones" "$WORK/mileposts" "$WORK/mileposts.json"
 mkdir -p "$WORK/pbf"
 # The tags the app reads plus v2's raw evidence (format/roadTile.mjs TAGS). area_tags=false keeps closed ways
 # (roundabouts) as lines.
@@ -22,6 +22,9 @@ echo '{"attributes":{"id":true},"linear_tags":true,"area_tags":false,"include_ta
 echo '{"attributes":{"id":true},"linear_tags":true,"area_tags":false,"include_tags":["highway","ref","destination","destination:lanes","destination:street","exit_to"]}' > "$WORK/signs.json"
 # Traffic signals (signals.mjs): the node, its id and what kind of signal it is.
 echo '{"attributes":{"id":true},"linear_tags":false,"area_tags":false,"include_tags":["highway","traffic_signals"]}' > "$WORK/signal-tags.json"
+# OSM milestones (mileposts.py): the value, and the road where the node names one.
+echo '{"attributes":{"id":true},"linear_tags":false,"area_tags":false,"include_tags":["highway","distance","pk","ref","highway:ref","route_ref"]}' > "$WORK/milestone-tags.json"
+mkdir -p "$WORK/milestones"
 # Places (pois.mjs): the tags that say what a place is and what it offers a truck.
 echo '{"attributes":{"id":true},"linear_tags":false,"area_tags":true,"include_tags":["amenity","highway","name","brand","hgv","fuel","fuel:diesel","fuel:HGV_diesel","shower","showers","food","restaurant","opening_hours","phone","contact:phone","capacity:hgv","truck_wash","addr:housenumber","addr:street","addr:city"]}' > "$WORK/places.json"
 
@@ -80,6 +83,11 @@ for state in $STATES; do
   # Never fatal: an exits failure must not stop the roads and names publish (exits.mjs finish then refuses the short set).
   osmium add-locations-to-ways "$WORK/names.pbf" -f opl -o - | python3 exits.py "$state" "$WORK/exits" \
     || echo "  exits: $state failed, skipped (roads and names carry on)" >&2
+  # OSM milestones for mileposts.py (run by roads.yml after the publish), the fallback where a state's DOT publishes no mile markers. Never fatal.
+  { osmium tags-filter "$pbf" n/highway=milestone -o "$WORK/milestones.pbf" --overwrite \
+    && osmium export "$WORK/milestones.pbf" -c "$WORK/milestone-tags.json" -f geojsonseq -x print_record_separator=false --geometry-types=point \
+      -o "$WORK/milestones/$state.geojsonseq" --overwrite; } || echo "  milestones: $state failed, skipped (roads and names carry on)" >&2
+  rm -f "$WORK/milestones.pbf"
   rm -f "$WORK/names.pbf"
   [ -n "${KEEP_PBF:-}" ] || rm -f "$pbf"
   echo "  $((SECONDS - start)) s"

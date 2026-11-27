@@ -19,6 +19,7 @@ driver data, and no credentials.
 | Road tiles v2 (class, one-way, restrictions) | `roads/v2/current.json` → `roads/v2/<buildId>/manifest.json` (one entry per 2° block) → `roads/v2/blocks/<sha256>.json` (each tile's place, size and SHA-256) → byte ranges of `roads/v2/packs/<sha256>.bin` (road tile v3, `format/roadTile.mjs`). Builds before schema 3 list `roads/v2/objects/<sha256>.bin` directly | OpenStreetMap (Geofabrik US state extracts) | With the roads |
 | State boundaries | `boundaries/v1/current.json` → `boundaries/v1/<buildId>/manifest.json` → `boundaries/v1/objects/<sha256>.json.gz` | U.S. Census Bureau TIGER/Line states | With the roads |
 | Bridges (clearances, width, load rating, posting, status) | `bridges/current.json` → `bridges/v1/<buildId>/<ST>.json.gz` (fields: `roads/bridges.py`) | FHWA National Bridge Inventory, highway bridges (yearly file) | Checked with the roads; rebuilt when FHWA publishes a new file |
+| Mileposts (mile markers / reference posts) | `mileposts/current.json` → `mileposts/v1/<buildId>/<ST>.json.gz` (fields and sources: `roads/mileposts.py`) | State DOT open milepost layers (9 states: IA, ID, IN, KY, MA, MI, MN, OH, SD; MO, NC, ND and NV are wired but not published until their terms are verified), OpenStreetMap milestones | Checked with the roads; a layer with an edit date (KY) is downloaded again only when it changes, the others every run |
 
 Publication order is always content first, then the version's manifest, then the `current.json`
 pointer last, so a reader never sees a pointer to data that is not there yet. Content objects
@@ -43,6 +44,11 @@ least 35 days. Each road-work manifest says, per feed and per tile, whether the 
 - **Bridges.** FHWA National Bridge Inventory, https://www.fhwa.dot.gov/bridge/nbi.cfm (U.S. government work,
   public domain). NBI coordinates can be hundreds of metres off, and a bridge missing from the file is not proof
   that none is there; not a clearance guarantee.
+- **Mileposts.** From each state DOT's open milepost or reference-post layer, credited in every state file's `sources`
+  (`roads/mileposts.py` SOURCES names the layer and its terms page: CC0 Kentucky, CC BY 4.0 Iowa, public domain Massachusetts and Ohio,
+  no restrictions Michigan, Minnesota with MnDOT's disclaimer carried in every file as its terms require, the others open with the agency's
+  disclaimer and credit; a layer whose terms could not be found is not published), and OpenStreetMap `highway=milestone` nodes (ODbL 1.0; a state file
+  holding any, `src` "osm", is a derived database under the same licence). Markers can be missing or moved; not a survey.
 - **State boundaries.** Derived from U.S. Census Bureau TIGER/Line Shapefiles (public domain);
   source: U.S. Census Bureau, TIGER/Line Shapefiles.
 

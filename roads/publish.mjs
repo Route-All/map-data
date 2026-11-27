@@ -1,5 +1,5 @@
 // Uploads a finished build (build.sh output) to R2 and makes it live. The one publish entry for
-// roads, places (KIND=pois), traffic signals (KIND=signals), road names (KIND=names), freeway exits (KIND=exits), frontage roads (KIND=frontage), bridges (KIND=bridges) and fuel (KIND=fuel), for scheduled and manual runs alike:
+// roads, places (KIND=pois), traffic signals (KIND=signals), road names (KIND=names), freeway exits (KIND=exits), frontage roads (KIND=frontage), bridges (KIND=bridges), mileposts (KIND=mileposts) and fuel (KIND=fuel), for scheduled and manual runs alike:
 //   R2_S3_ENDPOINT=… R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=… node publish.mjs   R2's S3 API
 //   ROLLBACK=1 …   allows a build from older sources than the live one
 //   STORE_DIR=<folder> node publish.mjs                                           the same, into a folder
@@ -109,7 +109,7 @@ if (process.env.R2_ACCESS_KEY_ID || process.env.STORE_DIR) {
   const store = await openStore(process.env.STORE_DIR);
   const run = KIND === 'fuel' ? publishFuel : KIND === 'roads2' ? (st, h) => publishAddressed(st, h, ROADS_V2)
     : KIND === 'boundaries' ? (st, h) => publishAddressed(st, h, BOUNDARIES) : KIND === 'signals' ? publishSignals
-    : KIND === 'names' || KIND === 'exits' || KIND === 'frontage' || KIND === 'bridges' ? (st, h) => publishNames(st, h, KIND) : publishBuild;
+    : KIND === 'names' || KIND === 'exits' || KIND === 'frontage' || KIND === 'bridges' || KIND === 'mileposts' ? (st, h) => publishNames(st, h, KIND) : publishBuild;
   await withLock(store, KIND, (KIND === 'fuel' ? 1 : 6) * 3_600_000, (holding) => run(store, holding));
   process.exit(0);
 }
@@ -215,7 +215,8 @@ async function publishFuel(store, holding) {
  * ones copied from the live build), then build.json, then the pointer LAST; builds other than current and previous are
  * deleted once their successor has been live a day.
  * Freeway exits (exits.py, exits.mjs; kind 'exits') publish the same way under exits/v1/<id>/ and exits/current.json, and bridges
- * (bridges.py; kind 'bridges') under bridges/v1/<id>/ and bridges/current.json.
+ * (bridges.py; kind 'bridges') under bridges/v1/<id>/ and bridges/current.json, and mile markers (mileposts.py; kind 'mileposts') under
+ * mileposts/v1/<id>/ and mileposts/current.json.
  */
 async function publishNames(store, holding, kind = 'names') {
   const { md5, pool } = await import('./store.mjs');
@@ -426,7 +427,7 @@ function wrangler() {
 }
 
 // LEGACY path from here on (no lock, retirement by lifecycle rule).
-if (KIND === 'signals' || KIND === 'names' || KIND === 'exits' || KIND === 'frontage' || KIND === 'bridges') throw new Error(`KIND=${KIND} publishes only through R2_* or STORE_DIR`);
+if (KIND === 'signals' || KIND === 'names' || KIND === 'exits' || KIND === 'frontage' || KIND === 'bridges' || KIND === 'mileposts') throw new Error(`KIND=${KIND} publishes only through R2_* or STORE_DIR`);
 console.log('LEGACY REST/wrangler path: no lock. The public data repo publishes through R2_* instead.');
 const r2 = process.env.WRANGLER ? wrangler() : rest();
 // KIND=fuel serves the week's fuel averages (fuel.mjs): one small file, no build or tiles.
