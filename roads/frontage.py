@@ -87,6 +87,7 @@ class Mains:
     def __init__(self):
         self.grid = defaultdict(list)   # cell -> [(a, b, refs, travel or None)]
         self.nodes = set()
+        self.node_keys = defaultdict(set)  # main-lane node -> refs keys of the carriageways through it
         self.link_end = defaultdict(list)  # node -> [link id]
         self.links = {}                 # link id -> (first node, last node, oneway)
         self.cells = set()
@@ -104,6 +105,8 @@ class Mains:
         self.nodes.update(nodes)
         ow = one_way(t)
         key = (';'.join(rs), hw)
+        for n in nodes:
+            self.node_keys[n].add(key[0])
         for i in range(1, len(coords)):
             a, b = coords[i - 1], coords[i]
             if ow == -1:
@@ -146,6 +149,7 @@ def judge(mains, t, nodes, coords):
     by = defaultdict(float)           # main refs -> metres alongside
     off, travel_v, side_v, dists, along = defaultdict(lambda: [0.0, 0.0]), [0.0, 0.0], defaultdict(lambda: [0.0, 0.0]), defaultdict(list), defaultdict(list)
     main_travel = defaultdict(lambda: [0.0, 0.0])
+    near_by = defaultdict(float)      # main refs -> metres alongside, every carriageway within NEAR_M (not only the nearest)
     for i in range(1, len(coords)):
         a, b = coords[i - 1], coords[i]
         ax, ay = xy(a, lat0); bx, by_ = xy(b, lat0)
@@ -160,7 +164,7 @@ def judge(mains, t, nodes, coords):
             f = (k + 0.5) / n
             p = (a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f)
             px, py = xy(p, lat0)
-            best = None
+            best, near_keys = None, set()
             for seg in mains.near(p):
                 (s0, s1, key, oneway) = seg
                 if hw == 'trunk' and (key[1] != 'motorway' or own & set(key[0].split(';'))):
@@ -176,12 +180,16 @@ def judge(mains, t, nodes, coords):
                 u = max(0.0, min(1.0, ((px - sx) * dx + (py - sy) * dy) / L))
                 qx, qy = sx + u * dx, sy + u * dy
                 d = math.hypot(px - qx, py - qy)
+                if d <= NEAR_M:
+                    near_keys.add(key[0])
                 if d <= NEAR_M and (best is None or d < best[0]):
                     best = (d, key, px - qx, py - qy, mb if oneway else None, (s0[0] + (s1[0] - s0[0]) * u, s0[1] + (s1[1] - s0[1]) * u))
             if best is None:
                 continue
             d, key, ox, oy, mtravel, q = best
             w = seg_len / n
+            for k2 in near_keys:
+                near_by[k2] += w
             by[key[0]] += w
             dists[key[0]].append(d)
             if d > 1:
@@ -215,7 +223,12 @@ def judge(mains, t, nodes, coords):
                 first, last, low = mains.links[lid]
                 kind = 'both' if low == 0 else ('on' if (first == n0) == (low == 1) else 'off')
                 ramps.append([chain, kind])
-    return [refs, side, travel, with_, hw, t.get('name') or '', t.get('oneway') or '', round(statistics.median(dists[refs])), round(beside),
+    # Beside two parallel freeways (Houston's BW 8 free lanes and the SHT toll lanes 30 m apart), the way is filed under the nearer one only,
+    # and a row printing the other found a hole in its frontage (TX 9b04f47c / c929d5a5: way 143346235 under SHT, its ramp onto BW 8, the
+    # SL-8 SFR row ending short of IH-45). The other is listed too where the way connects to it: by its own ref, or a ramp onto its main lanes.
+    reached = {k for chain, _ in ramps for end in mains.links[chain[-1]][:2] for k in mains.node_keys.get(end, ())}
+    others = [k for k in near_by if k != refs and near_by[k] >= MIN_M and (own & set(k.split(';')) or k in reached)]
+    return [';'.join([refs] + sorted(others)), side, travel, with_, hw, t.get('name') or '', t.get('oneway') or '', round(statistics.median(dists[refs])), round(beside),
             [round(q[0][1], 5), round(q[0][0], 5), round(q[-1][1], 5), round(q[-1][0], 5)], ramps,
             [round(v, 5) for c in coords for v in c]]
 
@@ -276,6 +289,11 @@ def demo():
     assert 45 <= w3[8] <= 55, w3[8]
     assert w3[11] == [[[7], 'on']], w3[11]
     assert e[6][3] is not None and abs(e[6][3] - 270) <= 1 and e[6][4] == 'with', e[6][:5]  # oneway=-1 drawn east, driven west
+    # Two parallel freeways: toll lanes "SHT" (way 8, westbound) 25 m from the frontage, the free lanes "BW 8" (way 2) 50 m off. The frontage
+    # (way 3) has a ramp onto BW 8 (way 7) and is filed under both; the unnamed piece (way 6) has none and stays under the nearer, SHT alone.
+    opl2 = [x.replace('I%20%20', 'BW%20%8') for x in opl] + [f'w8 v1 Thighway=motorway,ref=SHT Nn13x-94.99y{32.0 + dlat(85)},n14x-95.00y{32.0 + dlat(85)}']
+    e2 = {x[0]: x for x in build(lambda: iter(opl2))}
+    assert e2[3][1] == 'SHT;BW 8' and e2[6][1] == 'SHT', (e2[3][1], e2[6][1])
     print('frontage.py demo ok')
 
 if __name__ == '__main__':
