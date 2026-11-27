@@ -70,7 +70,7 @@ out = [M.same_layers([{'url': 'u', 'edited': 5, 'count': 7}], live['sources']['S
        M.same_layers([{'url': 'u', 'edited': None, 'count': 7}], [{'url': 'u', 'edited': None, 'count': 7}]),  # a count alone proves nothing
        M.same_layers([{'url': 'u', 'edited': 6, 'count': 7}], live['sources']['SD'])]
 f = {'SD': M.body('SD', [[1.0, 2.0, 'US 85', 53.29, 'BUTTE', None, 'dot']], ['x'])}
-live['states'] = {'SD': {'sha256': hashlib.sha256(f['SD']).hexdigest()}}
+live['states'] = {'SD': {'sha256': hashlib.sha256(f['SD']).hexdigest(), 'count': 1}}
 out += [M.unchanged(f, live), M.unchanged({**f, 'MN': f['SD']}, live), M.unchanged(f, None)]
 # An unchanged layer is not downloaded: its live rows are kept.
 M.stamp = lambda u, w: ({'url': u, 'edited': 5, 'count': 7}, {})
@@ -91,8 +91,75 @@ print(json.dumps(out))`);
   assert.deepEqual(got.slice(8), [1, ['SD: 503; live rows kept'], [], ['SD: 503; no DOT markers this run']]);
 });
 
-test('mileposts: every source names a public-domain or open licence', () => {
+test('mileposts: every published source names a public-domain or open licence; unverified ones are not built', () => {
   const lic = py(`print(json.dumps({st: s['licence'] for st, s in M.SOURCES.items()}))`);
   assert.deepEqual(Object.keys(lic).sort(), ['IA', 'ID', 'IN', 'KY', 'MA', 'MI', 'MN', 'MO', 'NC', 'ND', 'NV', 'OH', 'SD']);
-  for (const [st, l] of Object.entries(lic)) assert.match(l, /public domain|CC0|CC BY 4\.0|open data|public information|no use constraints/, st);
+  assert.deepEqual(Object.keys(lic).filter((st) => lic[st] === 'unverified').sort(), ['MO', 'NC', 'ND', 'NV']);
+  for (const [st, l] of Object.entries(lic)) if (l !== 'unverified') assert.match(l, /public domain|CC0|CC BY 4\.0|open data|public information|no restrictions|Distribution Liability/, st);
+  // An unverified layer is never fetched, and its state gets no DOT file.
+  const got = py(`M.stamp = lambda *a: (_ for _ in ()).throw(AssertionError('fetched'))
+files, stamps, notes = M.build('/nonexistent', ['NC'], None)
+print(json.dumps([sorted(files), notes]))`);
+  assert.deepEqual(got, [[], ['NC: licence unverified, not published']]);
+});
+
+test('mileposts: route variants keep their own ref, never the mainline (review: SD, MN, ID, NC, ND, NV, OSM CR)', () => {
+  const got = py(`S_ = M.SOURCES
+print(json.dumps([
+  S_['SD']['row']({'highway': '016 ', 'suffix_hwy_type': 'B', 'highway_category': 'US', 'mrm': '040.54', 'county': 'PENNINGTON', 'direction': ''})[0],
+  S_['SD']['row']({'highway': '090', 'suffix_hwy_type': 'L', 'highway_category': 'I', 'mrm': '010.00', 'county': 'LAWRENCE', 'direction': ''})[0],
+  S_['SD']['row']({'highway': '014A', 'suffix_hwy_type': '', 'highway_category': 'US', 'mrm': '041.95', 'county': 'LAWRENCE', 'direction': ''})[0],
+  S_['MN']['row']({'ROUTE_ID': '5200000000000010-D', 'REFERENCE_POST': '001'}),           # not a trunk highway: no "MN 10"
+  S_['MN']['row']({'ROUTE_ID': '0200000000000002BD', 'REFERENCE_POST': '012'})[0],        # US 2 business
+  S_['ID']['row']({'RouteName': 'I-15', 'MilePostSigns': '93', 'TravelDirection': '', 'MilePostType': 'Mile Marker', 'LoopSpur': 'Blackfoot'}),
+  S_['ID']['row']({'RouteName': 'I-84', 'MilePostSigns': '50', 'TravelDirection': '', 'MilePostType': 'Equation', 'LoopSpur': 'None'}),
+  S_['ID']['row']({'RouteName': 'I-84', 'MilePostSigns': '50', 'TravelDirection': 'I', 'MilePostType': 'Mile Marker/Equation', 'LoopSpur': 'None'})[0],
+  S_['NC']['row']({'RouteName': 'US-70 Bypass', 'SignMP': '5', 'County': 'Johnston', 'RouteDirection': 'E'})[0],
+  S_['ND']['row']({'RTE_SIN': 'S', 'HWY': 200, 'RTE_SUFFIX': 'A', 'REF_PT_NUM': 955.0, 'DIRECTION': 'E'})[0],
+  M.nv_route('IR580N'), M.nv_route('US095AN'), M.nv_route('SR028'),
+  M.named('CR 12', 'SD'), M.named('AU-9005', 'KY'), M.named('M-59', 'MI'), M.named('M-59', 'NC'), M.num('nan'), M.num('inf'),
+]))`);
+  assert.deepEqual(got, ['US 16B', 'I 90L', 'US 14A', null, 'US 2B', null, null, 'I 84', 'US 70 Bypass', 'ND 200A',
+    ['I 580', 'N'], ['US 95A', 'N'], ['NV 28', null], null, null, 'MI 59', null, null, null]);
+});
+
+test('mileposts: KY and NV posts restart per county: a row with no county is dropped and the file says so', () => {
+  const got = py(`feats = [{'attributes': {'RTNAME': 'I-75', 'MILEPOINT': 1, 'CO_NUMBER': c}, 'geometry': {'x': -84.5 + i / 10, 'y': 38.0}}
+         for i, c in enumerate([8, 34, 118, None])]
+r = M.rows('KY', feats)
+ky = json.loads(__import__('gzip').decompress(M.body('KY', r, ['x'])))
+sd = json.loads(__import__('gzip').decompress(M.body('SD', [[1.0, 2.0, 'US 85', 1, None, None, 'dot']], ['x'])))
+print(json.dumps([[x[4] for x in r], ky.get('county_restarts'), len(ky['mileposts']), 'county_restarts' in sd]))`);
+  assert.deepEqual(got, [['008', '034', '118'], true, 3, false]);
+});
+
+test('mileposts: a short fetch is refused, the parser version is in the stamp, a shrunken state keeps its live file, an unreadable live build stops the run', () => {
+  const got = py(`import gzip, urllib.error
+out = []
+# A layer that returns fewer rows than its service counts is a failed layer: never pinned by an unchanged edit date.
+M.stamp = lambda u, w: ({'url': u, 'edited': 5, 'count': len(S['SD']) + 1, 'parser': M.PARSER}, {})
+M.fetch = lambda u, w, info: S['SD']
+files, stamps, notes = M.build('/nonexistent', ['SD'], None)
+out += [sorted(files), notes[0].split(': ', 1)[1]]
+# A parser change re-reads a layer whose edit date did not move.
+out += [M.same_layers([{'url': 'u', 'edited': 5, 'count': 7, 'parser': M.PARSER}], [{'url': 'u', 'edited': 5, 'count': 7, 'parser': M.PARSER - 1}])]
+# Shrink guard: live SD holds 100 markers; this run's layer fails and no live rows come back, so the live file is kept as it is.
+live = {'path': 'mileposts/v1/X', 'states': {'SD': {'sha256': 'x', 'count': 100}}, 'sources': {'SD': [{'url': 'u', 'edited': 5, 'count': 7, 'parser': M.PARSER}]}}
+M.stamp = lambda u, w: (_ for _ in ()).throw(RuntimeError('503'))
+M.live_rows = lambda live, st: None
+M.live_gz = lambda live, st: b'LIVE FILE'
+files, stamps, notes = M.build('/nonexistent', ['SD'], live)
+out += [files['SD'].decode(), stamps['SD'] == live['sources']['SD'], notes]
+# 404: no live build yet (None); any other failure raises, so main writes nothing.
+def http(code):
+    def g(url, timeout=60): raise urllib.error.HTTPError(url, code, 'x', {}, None)
+    return g
+M.get = http(404); out += [M.live_build()]
+M.get = http(500)
+try: M.live_build(); out += ['no raise']
+except urllib.error.HTTPError as e: out += [e.code]
+print(json.dumps(out))`);
+  assert.deepEqual(got.slice(0, 2), [[], `https://sdgis.sd.gov/dot/rest/services/TIM/DOT_MileageReferenceMarkers/FeatureServer/0: fetched 7 of the 8 rows it counts; no DOT markers this run`]);
+  assert.equal(got[2], false);
+  assert.deepEqual(got.slice(3), ['LIVE FILE', true, ['SD: 503; no DOT markers this run', 'SD: 0 markers against 100 live; live file kept'], null, 500]);
 });
